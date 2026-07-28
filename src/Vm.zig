@@ -5,6 +5,7 @@ const MultiArrayList = std.MultiArrayList;
 const Writer = std.Io.Writer;
 
 const Chunk = @import("Chunk.zig");
+const Compilation = @import("Compilation.zig");
 const debug = @import("debug.zig");
 const Value = @import("Value.zig");
 
@@ -13,6 +14,7 @@ pub const STACK_MAX = 256;
 const Vm = @This();
 
 gpa: Allocator,
+arena: Allocator,
 io: Io,
 writer: *Writer,
 
@@ -26,14 +28,17 @@ stack_top: usize = 0,
 
 pub const InitOptions = struct {
     gpa: Allocator,
+    arena: Allocator,
     io: Io,
     writer: *Writer,
     stack_max: usize = std.math.pow(usize, 2, 10),
 };
 
+/// `arena` must live as long as the VM.
 pub fn init(options: InitOptions) !Vm {
     return Vm{
         .gpa = options.gpa,
+        .arena = options.arena,
         .io = options.io,
         .writer = options.writer,
         .stack = try options.gpa.alloc(Value, options.stack_max),
@@ -47,10 +52,9 @@ pub fn deinit(vm: *Vm) void {
 
 pub const InterpretResult = enum { ok, compile_error, runtime_error };
 
-pub fn interpret(vm: *Vm, chunk: *Chunk) !InterpretResult {
-    vm.chunk = chunk;
-    vm.ip = 0;
-    return vm.run();
+pub fn interpret(vm: *Vm, source: [:0]const u8) !InterpretResult {
+    try Compilation.compile(vm, source);
+    return .ok;
 }
 
 fn run(vm: *Vm) !InterpretResult {

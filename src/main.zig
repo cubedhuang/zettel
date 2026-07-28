@@ -13,61 +13,65 @@ pub fn main(init: std.process.Init) !void {
 
     const args = try init.minimal.args.toSlice(arena);
     if (args.len > 2) {
-        std.log.err("usage: zettel [script.zettel]", .{});
-        return error.InvalidUsage;
+        std.process.fatal("usage: zettel [script.zettel]", .{});
     }
 
-    // Stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
-
-    const file = std.Io.Dir.readFileAlloc(
-        std.Io.Dir.cwd(),
-        io,
-        args[1],
-        arena,
-        .limited(std.math.maxInt(u31) - 1),
-    ) catch |err| {
-        std.log.err("failed to open file: {s}", .{@errorName(err)});
-        return err;
-    };
-    _ = file;
+    defer stdout_writer.flush() catch {};
 
     var vm: Vm = try .init(.{
         .gpa = gpa,
+        .arena = arena,
         .io = io,
         .writer = stdout_writer,
     });
     defer vm.deinit();
 
-    var chunk: Chunk = .empty;
-    defer chunk.deinit(gpa);
+    if (args.len == 1) {
+        try repl(&vm);
+    } else {
+        try runFile(&vm, args[1]);
+    }
+}
 
-    var index = try chunk.addConstant(gpa, .{ .data = 1.2 });
-    try chunk.write(gpa, .constant, 123);
-    try chunk.writeByte(gpa, @intCast(index), 123);
+fn repl(vm: *Vm) !void {
+    var stdin_buffer: [4096]u8 = undefined;
+    var stdin_file_reader: Io.File.Reader = .init(.stdin(), vm.io, &stdin_buffer);
+    const stdin_reader = &stdin_file_reader.interface;
 
-    index = try chunk.addConstant(gpa, .{ .data = 3.4 });
-    try chunk.write(gpa, .constant, 123);
-    try chunk.writeByte(gpa, @intCast(index), 123);
+    while (true) {
+        try vm.writer.writeAll("> ");
+        try vm.writer.flush();
 
-    try chunk.write(gpa, .add, 123);
+        const maybeLine = try stdin_reader.takeDelimiter('\n');
 
-    index = try chunk.addConstant(gpa, .{ .data = 5.6 });
-    try chunk.write(gpa, .constant, 123);
-    try chunk.writeByte(gpa, @intCast(index), 123);
+        if (maybeLine) |line| {
+            const zeroDelimitedLine = try vm.arena.dupeSentinel(u8, line, 0);
+            _ = try vm.interpret(zeroDelimitedLine);
+        } else {
+            try vm.writer.writeByte('\n');
+            try vm.writer.flush();
+            break;
+        }
+    }
+}
 
-    try chunk.write(gpa, .div, 123);
-    try chunk.write(gpa, .negate, 123);
+fn runFile(vm: *Vm, path: []const u8) !void {
+    const file = std.Io.Dir.readFileAllocOptions(
+        std.Io.Dir.cwd(),
+        vm.io,
+        path,
+        vm.gpa,
+        .limited(std.math.maxInt(u31) - 1),
+        .of(u8),
+        0,
+    ) catch |err| {
+        std.log.err("failed to open file: {s}", .{@errorName(err)});
+        return err;
+    };
+    defer vm.gpa.free(file);
 
-    try chunk.write(gpa, .ret, 123);
-    chunk.disassemble("test chunk");
-
-    const result = try vm.interpret(&chunk);
-    std.debug.print("output: {}\n", .{result});
-
-    try stdout_writer.flush();
+    _ = try vm.interpret(file);
 }

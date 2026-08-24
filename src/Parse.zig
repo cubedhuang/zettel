@@ -1,3 +1,5 @@
+//! Parse contains the internal state and functionality necessary to generate an Ast.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
@@ -269,7 +271,7 @@ fn expectStmt(p: *Parse) !Node.Index {
     const doc_comments = try p.eatDocComments();
 
     const node = node: switch (p.tokenTag(p.tok_i)) {
-        .l_brace => try p.expectBlock(),
+        .l_brace => try p.expectBlock(.not_class),
         .keyword_import => @panic("TODO: ImportDecl"),
         .keyword_fn => @panic("TODO: FnDecl"),
         .keyword_class => @panic("TODO: ClassDecl"),
@@ -332,7 +334,11 @@ fn eatDocComments(p: *Parse) Allocator.Error!?TokenIndex {
 }
 
 /// Block <- LBRACE Decl* RBRACE NEWLINE?
-fn expectBlock(p: *Parse) !Node.Index {
+fn expectBlock(p: *Parse, block_context: BlockContext) !Node.Index {
+    const previous_block_context = p.block_context;
+    p.block_context = block_context;
+    defer p.block_context = previous_block_context;
+
     const l_brace = try p.expectToken(.l_brace);
 
     const scratch_top = p.scratch.items.len;
@@ -403,7 +409,7 @@ fn expectSimpleStmt(p: *Parse) !Node.Index {
         try p.expectStmtTerminator(.expected_semi_after_stmt, true);
         return lhs;
     };
-    const token = p.tok_i;
+    const token = p.nextToken();
     const rhs = try p.expectExpr();
     try p.expectStmtTerminator(.expected_semi_after_stmt, true);
 
@@ -684,8 +690,6 @@ fn literalNode(tok: Token.Tag) ?Node.Tag {
         .keyword_nil => .literal_nil,
         .keyword_true => .literal_true,
         .keyword_false => .literal_false,
-        .keyword_this => .literal_this,
-        .keyword_This => .literal_This,
         else => null,
     };
 }

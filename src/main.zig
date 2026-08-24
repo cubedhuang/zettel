@@ -1,7 +1,6 @@
 const std = @import("std");
 const Io = std.Io;
 
-const Chunk = @import("Chunk.zig");
 const Vm = @import("Vm.zig");
 
 const zettel = @import("zettel");

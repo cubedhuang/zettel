@@ -16,37 +16,37 @@ Classes as namespaces.
 
 ```js
 //! Vector.zettel
-fn This(x, y) {
-  this.x = x
-  this.y = y
+constructor init(self, x, y) {
+  self.x = x
+  self.y = y
 }
-fn add(this, that) {
-  return This(this.x + that.x, this.y + that.y)
+fn add(a, b) {
+  return init(a.x + b.x, a.y + b.y)
 }
-fn dot(this, that) {
-  return this.x * that.x + this.y * that.y
+fn dot(a, b) {
+  return a.x * b.x + a.y * b.y
 }
-UNIT_X := This(1, 0)
+UNIT_X := init(1, 0)
 
 //! main.zettel
 import "Vector.zettel"
-a := Vector(1, 2)
-b := Vector(2, 3)
+a := Vector.init(1, 2)
+b := Vector.init(2, 3)
 a = a.add(b) // Vector(3, 5)
 x := a.dot(Vector.UNIT_X) // 3
 ```
 
-This above is identical to the following:
+The above is identical to the following:
 
 ```js
 class Vector {
-  fn This(x, y) {
+  constructor init(self, x, y) {
     // ...
   }
   // ...
 }
 
-a := Vector(1, 2)
+a := Vector.init(1, 2)
 // ...
 ```
 
@@ -55,7 +55,7 @@ import "zettel:http"
 import "zettel:fs"
 words := http.fetch("https://api.linku.la/words").json()
 for word in words {
-  file := fs.File(word.id + ".md")
+  file := fs.File.init(word.id + ".md")
   file.write("# " + word.id + "\n")
 }
 ```
@@ -70,6 +70,7 @@ Root <- container_doc_comment? Stmt* EOF
 Stmt <- Block
       / ImportDecl
       / FnDecl
+      / ConstructorDecl
       / ClassDecl
       / ReturnStmt
       / BreakStmt
@@ -87,13 +88,15 @@ Block <- LBRACE Decl* RBRACE NEWLINE?
 
 ImportDecl <- KEYWORD_import IDENTIFIER? STRINGLITERAL stmt_terminator
 
-# Inside of a class body or the top level, the name of the function may be KEYWORD_This, and the first parameter may be KEYWORD_this
 FnDecl <- KEYWORD_fn IDENTIFIER FnParams NEWLINE? Block
 FnParams <- LPAREN FnParamsRest
 FnParamsRest
     <- RPAREN
      / DOT3 COMMA? RPAREN
      / ParamDecl (COMMA FnParamsRest / RPAREN)
+
+# Requires at least one parameter. May only be the direct child of a class block.
+ConstructorDecl <- KEYWORD_constructor IDENTIFIER FnParams NEWLINE? Block
 
 ClassDecl <- KEYWORD_class IDENTIFIER NEWLINE? Block
 
@@ -158,8 +161,6 @@ PrimaryExpr
      / KEYWORD_true
      / KEYWORD_false
      / KEYWORD_nil
-     / KEYWORD_this
-     / KEYWORD_This
 
 FnExpr <- KEYWORD_fn FnParams NEWLINE? Block
 ClassExpr <- KEYWORD_class NEWLINE? Block

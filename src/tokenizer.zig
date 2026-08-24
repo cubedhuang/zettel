@@ -28,8 +28,6 @@ pub const Token = struct {
         .{ "pub", .keyword_pub },
         .{ "return", .keyword_return },
         .{ "switch", .keyword_switch },
-        .{ "this", .keyword_this },
-        .{ "This", .keyword_This },
         .{ "true", .keyword_true },
         .{ "try", .keyword_try },
     });
@@ -128,8 +126,6 @@ pub const Token = struct {
         keyword_pub,
         keyword_return,
         keyword_switch,
-        keyword_this,
-        keyword_This,
         keyword_true,
         keyword_try,
 
@@ -226,8 +222,6 @@ pub const Token = struct {
                 .keyword_pub => "pub",
                 .keyword_return => "return",
                 .keyword_switch => "switch",
-                .keyword_this => "this",
-                .keyword_This => "This",
                 .keyword_true => "true",
                 .keyword_try => "try",
             };
@@ -1034,8 +1028,6 @@ pub const Tokenizer = struct {
             .keyword_break,
             .keyword_continue,
             .keyword_return,
-            .keyword_This,
-            .keyword_this,
             .keyword_false,
             .keyword_true,
             .keyword_nil,

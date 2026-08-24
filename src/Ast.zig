@@ -1,3 +1,6 @@
+//! Abstract syntax tree for Zettel source code.
+//! The root note is at nodes[0] and contains an `.extra_range` to a list of sub-nodes.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const Writer = std.Io.Writer;
@@ -134,7 +137,7 @@ pub fn deinit(tree: *Ast, gpa: Allocator) void {
 
 /// Result should be freed with tree.deinit() when there are
 /// no more references to any of the tokens or nodes.
-pub fn parse(gpa: Allocator, source: [:0]const u8) !Ast {
+pub fn parse(gpa: Allocator, source: [:0]const u8) Allocator.Error!Ast {
     var tokens = try Tokenizer.tokenize(gpa, source);
     defer tokens.deinit(gpa);
 
@@ -1356,10 +1359,6 @@ pub const Node = struct {
         literal_true,
         /// The `main_token` field is the keyword.
         literal_false,
-        /// The `main_token` field is the keyword.
-        literal_this,
-        /// The `main_token` field is the keyword.
-        literal_This,
         /// The `data` field is unused.
         literal_number,
         /// `:ok`.

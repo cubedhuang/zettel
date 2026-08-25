@@ -292,32 +292,9 @@ pub fn renderError(tree: Ast, parse_error: Error, w: *Writer) Writer.Error!void 
         .chained_comparison_operators => {
             return w.writeAll("comparison operators cannot be chained");
         },
-        .decl_between_fields => {
-            return w.writeAll("declarations are not allowed between container fields");
-        },
         .expected_block => {
             return w.print("expected block, found '{s}'", .{
                 tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_block_or_assignment => {
-            return w.print("expected block or assignment, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_block_or_expr => {
-            return w.print("expected block or expression, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_block_or_field => {
-            return w.print("expected block or field, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_container_members => {
-            return w.print("expected test, comptime, var decl, or container field, found '{s}'", .{
-                tree.tokenTag(parse_error.token).symbol(),
             });
         },
         .expected_expr => {
@@ -327,26 +304,6 @@ pub fn renderError(tree: Ast, parse_error: Error, w: *Writer) Writer.Error!void 
         },
         .expected_expr_or_assignment => {
             return w.print("expected expression or assignment, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_expr_or_var_decl => {
-            return w.print("expected expression or var decl, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_fn => {
-            return w.print("expected function, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_inlinable => {
-            return w.print("expected 'while' or 'for', found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_labelable => {
-            return w.print("expected 'while', 'for', 'inline', or '{{', found '{s}'", .{
                 tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
             });
         },
@@ -360,82 +317,13 @@ pub fn renderError(tree: Ast, parse_error: Error, w: *Writer) Writer.Error!void 
                 tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
             });
         },
-        .expected_primary_type_expr => {
-            return w.print("expected primary type expression, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
         .expected_pub_item => {
             return w.writeAll("expected function or variable declaration after pub");
-        },
-        .expected_return_type => {
-            return w.print("expected return type expression, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_semi_or_else => {
-            return w.writeAll("expected ';' or 'else' after statement");
         },
         .expected_statement => {
             return w.print("expected statement, found '{s}'", .{
                 tree.tokenTag(parse_error.token).symbol(),
             });
-        },
-        .expected_suffix_op => {
-            return w.print("expected pointer dereference, optional unwrap, or field access, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_type_expr => {
-            return w.print("expected type expression, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_var_decl => {
-            return w.print("expected variable declaration, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_var_decl_or_fn => {
-            return w.print("expected variable declaration or function, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_loop_payload => {
-            return w.print("expected loop payload, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .expected_container => {
-            return w.print("expected a struct, enum or union, found '{s}'", .{
-                tree.tokenTag(parse_error.token + @intFromBool(parse_error.token_is_prev)).symbol(),
-            });
-        },
-        .extern_fn_body => {
-            return w.writeAll("extern functions have no body");
-        },
-        .extra_addrspace_qualifier => {
-            return w.writeAll("extra addrspace qualifier");
-        },
-        .extra_align_qualifier => {
-            return w.writeAll("extra align qualifier");
-        },
-        .extra_allowzero_qualifier => {
-            return w.writeAll("extra allowzero qualifier");
-        },
-        .extra_const_qualifier => {
-            return w.writeAll("extra const qualifier");
-        },
-        .extra_volatile_qualifier => {
-            return w.writeAll("extra volatile qualifier");
-        },
-        .ptr_mod_on_array_child_type => {
-            return w.print("pointer modifier '{s}' not allowed on array child type", .{
-                tree.tokenTag(parse_error.token).symbol(),
-            });
-        },
-        .invalid_bit_range => {
-            return w.writeAll("bit range only allowed on single item pointers");
         },
         .same_line_doc_comment => {
             return w.writeAll("same line documentation comment");
@@ -456,9 +344,6 @@ pub fn renderError(tree: Ast, parse_error: Error, w: *Writer) Writer.Error!void 
         .expected_semi_after_stmt => {
             return w.writeAll("expected ';' or newline after statement");
         },
-        .expected_comma_after_field => {
-            return w.writeAll("expected ',' after field");
-        },
         .expected_comma_after_arg => {
             return w.writeAll("expected ',' after argument");
         },
@@ -468,54 +353,8 @@ pub fn renderError(tree: Ast, parse_error: Error, w: *Writer) Writer.Error!void 
         .expected_comma_after_initializer => {
             return w.writeAll("expected ',' after initializer");
         },
-        .expected_comma_after_switch_prong => {
-            return w.writeAll("expected ',' after switch prong");
-        },
-        .expected_comma_after_for_operand => {
-            return w.writeAll("expected ',' after for operand");
-        },
-        .expected_comma_after_capture => {
-            return w.writeAll("expected ',' after for capture");
-        },
-        .expected_initializer => {
-            return w.writeAll("expected field initializer");
-        },
-        .mismatched_binary_op_whitespace => {
-            return w.print("binary operator '{s}' has whitespace on one side, but not the other", .{tree.tokenTag(parse_error.token).lexeme().?});
-        },
         .invalid_ampersand_ampersand => {
             return w.writeAll("ambiguous use of '&&'; use 'and' for logical AND, or change whitespace to ' & &' for bitwise AND");
-        },
-        .c_style_container => {
-            return w.print("'{s} {s}' is invalid", .{
-                parse_error.extra.expected_tag.symbol(), tree.tokenSlice(parse_error.token),
-            });
-        },
-        .zig_style_container => {
-            return w.print("to declare a container do 'const {s} = {s}'", .{
-                tree.tokenSlice(parse_error.token), parse_error.extra.expected_tag.symbol(),
-            });
-        },
-        .previous_field => {
-            return w.writeAll("field before declarations here");
-        },
-        .next_field => {
-            return w.writeAll("field after declarations here");
-        },
-        .expected_var_const => {
-            return w.writeAll("expected 'var' or 'const' before variable declaration");
-        },
-        .wrong_equal_var_decl => {
-            return w.writeAll("variable initialized with '==' instead of '='");
-        },
-        .var_const_decl => {
-            return w.writeAll("use 'var' or 'const' to declare variable");
-        },
-        .extra_for_capture => {
-            return w.writeAll("extra capture in for loop");
-        },
-        .for_input_not_captured => {
-            return w.writeAll("for input is not captured");
         },
 
         .invalid_byte => {
@@ -893,7 +732,6 @@ pub fn getNodeSource(tree: Ast, node: Node.Index) []const u8 {
 
 pub const Error = struct {
     tag: Tag,
-    is_note: bool = false,
     /// True if `token` points to the token before the token causing an issue.
     token_is_prev: bool = false,
     token: TokenIndex,
@@ -905,39 +743,13 @@ pub const Error = struct {
 
     pub const Tag = enum {
         chained_comparison_operators,
-        decl_between_fields,
         expected_block,
-        expected_block_or_assignment,
-        expected_block_or_expr,
-        expected_block_or_field,
-        expected_container_members,
         expected_expr,
         expected_expr_or_assignment,
-        expected_expr_or_var_decl,
-        expected_fn,
-        expected_inlinable,
-        expected_labelable,
         expected_param_list,
         expected_prefix_expr,
-        expected_primary_type_expr,
         expected_pub_item,
-        expected_return_type,
-        expected_semi_or_else,
         expected_statement,
-        expected_suffix_op,
-        expected_type_expr,
-        expected_var_decl,
-        expected_var_decl_or_fn,
-        expected_loop_payload,
-        expected_container,
-        extern_fn_body,
-        extra_addrspace_qualifier,
-        extra_align_qualifier,
-        extra_allowzero_qualifier,
-        extra_const_qualifier,
-        extra_volatile_qualifier,
-        ptr_mod_on_array_child_type,
-        invalid_bit_range,
         same_line_doc_comment,
         invalid_doc_comment,
 
@@ -945,26 +757,10 @@ pub const Error = struct {
         invalid_decl_target,
         expected_semi_after_decl,
         expected_semi_after_stmt,
-        expected_comma_after_field,
         expected_comma_after_arg,
         expected_comma_after_param,
         expected_comma_after_initializer,
-        expected_comma_after_switch_prong,
-        expected_comma_after_for_operand,
-        expected_comma_after_capture,
-        expected_initializer,
-        mismatched_binary_op_whitespace,
         invalid_ampersand_ampersand,
-        c_style_container,
-        expected_var_const,
-        wrong_equal_var_decl,
-        var_const_decl,
-        extra_for_capture,
-        for_input_not_captured,
-
-        zig_style_container,
-        previous_field,
-        next_field,
 
         /// `expected_tag` is populated.
         expected_token,

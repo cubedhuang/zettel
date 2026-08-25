@@ -22,18 +22,21 @@ proto: *const Proto = undefined,
 ip: usize = 0,
 
 stack: []Value,
-// index after top item
+/// index after top item
 stack_top: usize = 0,
 objects: MemoryPool(Value.Object) = .empty,
 objects_head: ?*Value.Object = null,
+
+/// intern table
 strings: std.StringHashMap(*Value.Object),
+globals: std.AutoHashMap(Value, Value),
 
 pub const InitOptions = struct {
     gpa: Allocator,
     arena: Allocator,
     io: Io,
     writer: *Writer,
-    stack_max: usize = std.math.pow(usize, 2, 10),
+    stack_max: usize = std.math.pow(usize, 2, 16),
 };
 
 /// `arena` must live as long as the VM.
@@ -45,6 +48,7 @@ pub fn init(options: InitOptions) !Vm {
         .writer = options.writer,
         .stack = try options.gpa.alloc(Value, options.stack_max),
         .strings = .init(options.gpa),
+        .globals = .init(options.gpa),
     };
 }
 
@@ -57,6 +61,7 @@ pub fn deinit(vm: *Vm) void {
     vm.freeAllObjectData();
     vm.objects.deinit(vm.gpa);
     vm.strings.deinit();
+    vm.globals.deinit();
     vm.* = undefined;
 }
 
@@ -143,6 +148,29 @@ fn run(vm: *Vm) !InterpretResult {
             .push_constant => {
                 const constant = vm.readConstant();
                 vm.push(constant);
+            },
+            .get_global => {
+                const name = vm.readConstant();
+                if (vm.globals.get(name)) |value| {
+                    vm.push(value);
+                } else {
+                    std.debug.print("undeclared variable {s}\n", .{name.asObject().data.string.bytes});
+                    return .runtime_error;
+                }
+            },
+            .define_global => {
+                const name = vm.readConstant();
+                try vm.globals.put(name, vm.peek(0));
+                _ = vm.pop();
+            },
+            .set_global => {
+                const name = vm.readConstant();
+                defer _ = vm.pop();
+                if (try vm.globals.fetchPut(name, vm.peek(0))) |_| {} else {
+                    _ = vm.globals.remove(name);
+                    std.debug.print("undeclared variable {s}\n", .{name.asObject().data.string.bytes});
+                    return .runtime_error;
+                }
             },
             .bool_not => {
                 vm.push(.fromBool(vm.pop().isFalsey()));

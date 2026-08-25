@@ -3,6 +3,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const Ast = @import("Ast.zig");
+const TokenIndex = Ast.TokenIndex;
 const Proto = @import("Proto.zig");
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Vm = @import("Vm.zig");
@@ -100,11 +101,7 @@ fn lowerStmt(comp: *Compilation, node: Ast.Node.Index) !void {
 ///      / Expr
 fn lowerSimpleStmt(comp: *Compilation, node: Ast.Node.Index) !void {
     switch (comp.tree.nodeTag(node)) {
-        .var_decl => {
-            const name, const value = comp.tree.nodeData(node).token_and_node;
-            std.debug.print("encountered decl of {s}\n", .{comp.tree.tokenSlice(name)});
-            _ = value;
-        },
+        .var_decl => try comp.lowerDecl(node),
         .assign => try comp.lowerAssign(node),
         .assign_shl => try comp.lowerAssignOp(node, .shl),
         .assign_shr => try comp.lowerAssignOp(node, .shr),
@@ -127,10 +124,28 @@ fn lowerSimpleStmt(comp: *Compilation, node: Ast.Node.Index) !void {
     }
 }
 
-fn lowerAssign(comp: *Compilation, node: Ast.Node.Index) !void {
+fn lowerDecl(comp: *Compilation, node: Ast.Node.Index) !void {
     const name, const value = comp.tree.nodeData(node).token_and_node;
-    std.debug.print("encountered assign of {s}\n", .{comp.tree.tokenSlice(name)});
-    _ = value;
+    try comp.lowerExpr(value);
+    const name_constant = try comp.identifierConstant(name);
+    const main_token = comp.tree.nodeMainToken(node);
+    const offset = comp.tree.tokenStart(main_token);
+    try comp.defineVariable(name_constant, offset);
+}
+
+fn lowerAssign(comp: *Compilation, node: Ast.Node.Index) !void {
+    const target, const value = comp.tree.nodeData(node).node_and_node;
+    try comp.lowerExpr(value);
+    switch (comp.tree.nodeTag(target)) {
+        .identifier => {
+            const name = comp.tree.nodeMainToken(target);
+            try comp.namedVariable(name, .set);
+        },
+        else => {
+            std.debug.print("invalid assignment target\n", .{});
+            return error.ParseError;
+        },
+    }
 }
 
 fn lowerAssignOp(comp: *Compilation, node: Ast.Node.Index, op: anytype) !void {
@@ -208,6 +223,10 @@ fn lowerExpr(comp: *Compilation, node: Ast.Node.Index) Allocator.Error!void {
         .negation => return comp.lowerUnaryOp(node, .negate),
         // .negation_wrap => return comp.lowerUnaryOp(node, .negate_wrap),
 
+        .identifier => {
+            const token = comp.tree.nodeMainToken(node);
+            try comp.namedVariable(token, .get);
+        },
         .literal_nil => {
             const token = comp.tree.nodeMainToken(node);
             try comp.proto.write(comp.vm.gpa, .push_nil, token);
@@ -262,6 +281,27 @@ fn lowerUnaryOp(comp: *Compilation, node: Ast.Node.Index, op: Proto.OpCode) !voi
     const main_token = comp.tree.nodeMainToken(node);
     const offset = comp.tree.tokenStart(main_token);
     try comp.proto.write(comp.vm.gpa, op, offset);
+}
+
+fn identifierConstant(comp: *Compilation, token_index: TokenIndex) !u8 {
+    const identifier = try comp.vm.copyString(comp.tree.tokenSlice(token_index));
+    const constant_index = try comp.proto.addConstant(comp.vm.gpa, .fromObject(identifier));
+    return constant_index;
+}
+
+fn namedVariable(comp: *Compilation, token_index: TokenIndex, access: enum { set, get }) !void {
+    const constant_index = try comp.identifierConstant(token_index);
+    const offset = comp.tree.tokenStart(token_index);
+    try comp.proto.write(comp.vm.gpa, switch (access) {
+        .get => .get_global,
+        .set => .set_global,
+    }, offset);
+    try comp.proto.writeByte(comp.vm.gpa, constant_index, offset);
+}
+
+fn defineVariable(comp: *Compilation, global: u8, offset: usize) !void {
+    try comp.proto.write(comp.vm.gpa, .define_global, offset);
+    try comp.proto.writeByte(comp.vm.gpa, global, offset);
 }
 
 fn setCurrentProto(comp: *Compilation, index: Proto.Index) void {

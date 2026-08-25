@@ -3,13 +3,23 @@
 A simple scripting language.
 
 ```js
-fn fib(n) {
-  if n <= 1 {
-    return n
+class Fib {
+  constructor init(self) {
+    self.a = 0
+    self.b = 1
   }
-  return fib(n - 1) + fib(n - 2)
+  fn next(self) {
+    t := self.a
+    self.a = b
+    self.b += t
+    return t
+  }
 }
-print("the 10th Fibonacci number is", fib(10))
+
+fib := Fib.init()
+for n := fib.next(); n < 1000; {
+  print(n)
+}
 ```
 
 Classes as namespaces.
@@ -124,7 +134,7 @@ InlineSimpleStmt
     <- VarDecl
      / AssignStmt
      / Expr
-     
+
 # later validated to be a list of identifiers
 VarDecl <- ExprList COLON_EQUAL ExprList
 

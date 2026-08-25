@@ -16,6 +16,10 @@ pub const OpCode = enum(u8) {
     push_false,
     push_constant,
 
+    get_global,
+    define_global,
+    set_global,
+
     // unary
     bool_not,
     negate,
@@ -109,7 +113,11 @@ pub fn disassembleInstruction(p: Proto, offset: usize) usize {
             std.debug.print("{s}\n", .{@tagName(instruction)});
             return offset + 1;
         },
-        .push_constant => {
+        .push_constant,
+        .get_global,
+        .define_global,
+        .set_global,
+        => {
             const index = @intFromEnum(p.code.items[offset + 1]);
             std.debug.print("{s:<16} {d:>4} '{f}'\n", .{ @tagName(instruction), index, p.constants.items[index] });
             return offset + 2;

@@ -394,6 +394,7 @@ fn expectSimpleStmt(p: *Parse) !Node.Index {
     if (p.eatToken(.colon_equal)) |colon_equal| {
         if (p.nodeTag(lhs) != .identifier) {
             try p.warn(.invalid_decl_target);
+            return error.ParseError;
         }
         const rhs = try p.expectExpr();
         try p.expectStmtTerminator(.expected_semi_after_decl, true);

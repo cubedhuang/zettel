@@ -3,6 +3,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const Writer = std.Io.Writer;
 
 const Ast = @import("Ast.zig");
 const TokenIndex = Ast.TokenIndex;
@@ -14,7 +15,18 @@ const Vm = @import("Vm.zig");
 const debug = @import("debug.zig");
 
 pub const Error = struct {
-    msg: []const u8,
+    tag: Tag,
+    location: Location,
+
+    pub const Location = union(enum) {
+        node: Ast.Node.Index,
+        token: TokenIndex,
+    };
+
+    pub const Tag = enum {
+        invalid_assign_target,
+        todo,
+    };
 };
 
 const Compilation = @This();
@@ -24,7 +36,7 @@ arena: Allocator,
 tree: *const Ast,
 proto_index: Proto.Index,
 proto: *Proto,
-diags: ArrayList(Error),
+errors: ArrayList(Error),
 
 pub fn compile(vm: *Vm, source: *const Source) !?Proto.Index {
     var tree = try Ast.parse(vm.gpa, source.bytes);
@@ -39,39 +51,65 @@ pub fn compile(vm: *Vm, source: *const Source) !?Proto.Index {
         .tree = &tree,
         .proto_index = undefined,
         .proto = undefined,
-        .diags = .empty,
+        .errors = .empty,
     };
 
-    if (tree.errors.len > 0) try comp.reportParseErrors(source);
-
-    return try comp.lower();
+    const proto_index = if (tree.errors.len == 0) try comp.lower() else null;
+    if (tree.errors.len > 0 or comp.errors.items.len > 0) {
+        try comp.reportErrors(source);
+        return null;
+    }
+    return proto_index;
 }
 
-fn reportParseErrors(comp: *Compilation, source: *const Source) !void {
+fn addError(comp: *Compilation, tag: Error.Tag, location: Error.Location) Allocator.Error!void {
+    try comp.errors.append(comp.arena, .{ .tag = tag, .location = location });
+}
+
+fn reportErrors(comp: *Compilation, source: *const Source) !void {
     const tree = comp.tree;
 
     var diagnostics: ArrayList(report.Diagnostic) = .empty;
-    try diagnostics.ensureTotalCapacityPrecise(comp.arena, tree.errors.len);
+    try diagnostics.ensureTotalCapacityPrecise(comp.arena, tree.errors.len + comp.errors.items.len);
 
-    var message: std.Io.Writer.Allocating = .init(comp.arena);
+    var message: Writer.Allocating = .init(comp.arena);
     for (tree.errors) |parse_error| {
         message.clearRetainingCapacity();
         tree.renderError(parse_error, &message.writer) catch return error.OutOfMemory;
-
-        const span = tree.errorSpan(parse_error);
-        diagnostics.appendAssumeCapacity(.{
-            .severity = .@"error",
-            .span = .{ .start = span.start, .end = span.end },
-            .message = try comp.arena.dupe(u8, message.written()),
-        });
+        diagnostics.appendAssumeCapacity(try comp.diagnostic(tree.errorSpan(parse_error), message.written()));
     }
-
+    for (comp.errors.items) |compile_error| {
+        message.clearRetainingCapacity();
+        comp.renderError(compile_error, &message.writer) catch return error.OutOfMemory;
+        diagnostics.appendAssumeCapacity(try comp.diagnostic(comp.errorSpan(compile_error), message.written()));
+    }
     try report.render(comp.vm.diags, source, diagnostics.items, comp.vm.report_options);
 }
 
-fn lower(comp: *Compilation) !?Proto.Index {
-    if (comp.tree.errors.len > 0) return null;
+fn diagnostic(comp: *Compilation, span: Ast.Span, message: []const u8) Allocator.Error!report.Diagnostic {
+    return .{
+        .severity = .@"error",
+        .span = .{ .start = span.start, .end = span.end },
+        .message = try comp.arena.dupe(u8, message),
+    };
+}
 
+fn errorSpan(comp: *Compilation, compile_error: Error) Ast.Span {
+    return switch (compile_error.location) {
+        .node => |node| comp.tree.nodeToSpan(node),
+        .token => |token| comp.tree.tokenToSpan(token),
+    };
+}
+
+fn renderError(comp: *Compilation, compile_error: Error, writer: *Writer) Writer.Error!void {
+    _ = comp;
+    switch (compile_error.tag) {
+        .invalid_assign_target => try writer.writeAll("invalid assignment target"),
+        .todo => try writer.writeAll("not implemented yet"),
+    }
+}
+
+fn lower(comp: *Compilation) !Proto.Index {
     const proto_index = try comp.vm.addProto();
     comp.setCurrentProto(proto_index);
 
@@ -162,18 +200,13 @@ fn lowerAssign(comp: *Compilation, node: Ast.Node.Index) !void {
             const name = comp.tree.nodeMainToken(target);
             try comp.namedVariable(name, .set);
         },
-        else => {
-            std.debug.print("invalid assignment target\n", .{});
-            return error.ParseError;
-        },
+        else => try comp.addError(.invalid_assign_target, .{ .node = target }),
     }
 }
 
 fn lowerAssignOp(comp: *Compilation, node: Ast.Node.Index, op: anytype) !void {
-    const name, const value = comp.tree.nodeData(node).token_and_node;
-    std.debug.print("encountered assign with op of {s}\n", .{comp.tree.tokenSlice(name)});
-    _ = value;
     _ = op;
+    try comp.addError(.todo, .{ .token = comp.tree.nodeMainToken(node) });
 }
 
 /// Expr <- TernaryExpr

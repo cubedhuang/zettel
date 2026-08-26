@@ -59,7 +59,17 @@ pub fn main(init: std.process.Init) !void {
     defer vm.deinit();
 
     if (script) |path| {
-        try runFile(&vm, path);
+        const result = try runFile(&vm, path);
+        if (result != .ok) {
+            // `std.process.exit` doesn't call deferred statements.
+            try stdout_writer.flush();
+            try stderr_writer.flush();
+            std.process.exit(switch (result) {
+                .ok => unreachable,
+                .compile_error => 65,
+                .runtime_error => 70,
+            });
+        }
     } else {
         try repl(&vm);
     }
@@ -95,7 +105,7 @@ fn repl(vm: *Vm) !void {
     }
 }
 
-fn runFile(vm: *Vm, path: []const u8) !void {
+fn runFile(vm: *Vm, path: []const u8) !Vm.InterpretResult {
     const file = std.Io.Dir.readFileAllocOptions(
         std.Io.Dir.cwd(),
         vm.io,
@@ -112,5 +122,5 @@ fn runFile(vm: *Vm, path: []const u8) !void {
 
     var source: Source = try .init(vm.gpa, path, file);
     defer source.deinit(vm.gpa);
-    _ = try vm.interpret(&source);
+    return vm.interpret(&source);
 }

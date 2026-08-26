@@ -427,6 +427,9 @@ pub fn firstToken(tree: Ast, node: Node.Index) TokenIndex {
         .literal_number,
         .literal_string,
         .literal_multiline_string,
+        .literal_nil,
+        .literal_true,
+        .literal_false,
         .grouped_expression,
         => return tree.nodeMainToken(n) - end_offset,
 
@@ -434,7 +437,11 @@ pub fn firstToken(tree: Ast, node: Node.Index) TokenIndex {
         .literal_atom,
         => return tree.nodeMainToken(n) - 1 - end_offset,
 
-        .@"catch",
+        .ternary => {
+            _, const extra_index = tree.nodeData(n).node_and_extra;
+            n = tree.extraData(extra_index, Node.Ternary).then_expr;
+        },
+
         .equal_equal,
         .bang_equal,
         .less_than,
@@ -591,8 +598,8 @@ pub fn lastToken(tree: Ast, node: Node.Index) TokenIndex {
         .fn_proto,
         .fn_proto_comma,
         => {
-            const extra_index = tree.nodeData(n).extra_range.end - 1;
-            const last_param = tree.extraData(extra_index, TokenIndex);
+            const params = tree.nodeData(n).extra_range;
+            const last_param = tree.extra_data[@intFromEnum(params.end) - 1];
             return last_param + 1 + end_offset;
         },
 
@@ -605,7 +612,15 @@ pub fn lastToken(tree: Ast, node: Node.Index) TokenIndex {
         .identifier,
         .literal_atom,
         .literal_string,
+        .literal_nil,
+        .literal_true,
+        .literal_false,
         => return tree.nodeMainToken(n) + end_offset,
+
+        .ternary => {
+            _, const extra_index = tree.nodeData(n).node_and_extra;
+            n = tree.extraData(extra_index, Node.Ternary).else_expr;
+        },
 
         .@"return" => {
             n = tree.nodeData(n).opt_node.unwrap() orelse {
@@ -654,6 +669,12 @@ pub fn lastToken(tree: Ast, node: Node.Index) TokenIndex {
                 return tree.nodeMainToken(n) + end_offset;
             };
         },
+        .call_one_comma,
+        => {
+            _, const first_param = tree.nodeData(n).node_and_opt_node;
+            end_offset += 2; // for the comma + rparen
+            n = first_param.unwrap() orelse unreachable;
+        },
 
         .array_init_two,
         .block_two,
@@ -684,7 +705,6 @@ pub fn lastToken(tree: Ast, node: Node.Index) TokenIndex {
                 unreachable;
             }
         },
-        .var_decl => n = tree.nodeData(n).token_and_node[1],
 
         .array_access,
         => {
@@ -1230,6 +1250,7 @@ pub const Node = struct {
         node_and_opt_node: struct { Index, OptionalIndex },
         opt_node_and_node: struct { OptionalIndex, Index },
         node_and_extra: struct { Index, ExtraIndex },
+        opt_node_and_extra: struct { OptionalIndex, ExtraIndex },
         extra_and_node: struct { ExtraIndex, Index },
         extra_and_opt_node: struct { ExtraIndex, OptionalIndex },
         node_and_token: struct { Index, TokenIndex },
@@ -1252,6 +1273,11 @@ pub const Node = struct {
     pub const Ternary = struct {
         then_expr: Node.Index,
         else_expr: Node.Index,
+    };
+
+    pub const Slice = struct {
+        start: Node.Index,
+        end: Node.Index,
     };
 
     pub const If = struct {

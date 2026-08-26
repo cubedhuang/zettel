@@ -280,7 +280,7 @@ pub const Tokenizer = struct {
             switch (token.tag) {
                 .period, .keyword_and, .keyword_or => {
                     var count = tokens.len;
-                    while (count >= 0 and tokens.items(.tag)[count - 1] == .newline) {
+                    while (count > 0 and tokens.items(.tag)[count - 1] == .newline) {
                         count -= 1;
                     }
                     tokens.shrinkRetainingCapacity(count);

@@ -94,11 +94,12 @@ pub fn renderDiagnostic(
 
     const span_start = @min(start - line_start, line_text.len);
     const span_end = @max(span_start, @min(end - line_start, line_text.len));
+    const column = span_start + 1;
 
     switch (options.style) {
         .short => {
             try term.setColor(.bold);
-            try term.writer.print("{s}:{d}:{d}: ", .{ source.path, line + 1, span_start });
+            try term.writer.print("{s}:{d}:{d}: ", .{ source.path, line + 1, column });
             try term.setColor(diagnostic.severity.color());
             try term.writer.print("{s}: ", .{diagnostic.severity.text()});
             try term.setColor(.reset);
@@ -109,7 +110,7 @@ pub fn renderDiagnostic(
             const last = @min(line + options.context_lines, source.lineCount() - 1);
 
             try writeHeadline(term, diagnostic);
-            try writeLocation(term, source, line + 1, span_start);
+            try writeLocation(term, source, line + 1, column);
 
             const gutter = @max(4, digitCount(last + 1));
             for (first..last + 1) |n| {

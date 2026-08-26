@@ -195,6 +195,15 @@ pub fn errorOffset(tree: Ast, parse_error: Error) u32 {
     return if (parse_error.token_is_prev) @intCast(tree.tokenSlice(parse_error.token).len) else 0;
 }
 
+pub fn errorSpan(tree: Ast, parse_error: Error) Span {
+    const start = tree.tokenStart(parse_error.token) + tree.errorOffset(parse_error);
+    const end = if (parse_error.token_is_prev)
+        start
+    else
+        start + @as(u32, @intCast(tree.tokenSlice(parse_error.token).len));
+    return .{ .start = start, .end = end, .main = start };
+}
+
 pub fn tokenLocation(self: Ast, start_offset: ByteOffset, token_index: TokenIndex) Location {
     var loc = Location{
         .line = 0,

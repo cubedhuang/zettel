@@ -7,6 +7,8 @@ const Writer = std.Io.Writer;
 
 const Compilation = @import("Compilation.zig");
 const Proto = @import("Proto.zig");
+const report = @import("report.zig");
+const Source = @import("Source.zig");
 const Value = @import("Value.zig");
 const debug = @import("debug.zig");
 
@@ -16,6 +18,8 @@ gpa: Allocator,
 arena: Allocator,
 io: Io,
 writer: *Writer,
+diags: Io.Terminal,
+report_options: report.Options,
 
 protos: ArrayList(Proto) = .empty,
 proto: *const Proto = undefined,
@@ -36,6 +40,8 @@ pub const InitOptions = struct {
     arena: Allocator,
     io: Io,
     writer: *Writer,
+    diags: Io.Terminal,
+    report_options: report.Options = .{},
     stack_max: usize = std.math.pow(usize, 2, 16),
 };
 
@@ -46,6 +52,8 @@ pub fn init(options: InitOptions) !Vm {
         .arena = options.arena,
         .io = options.io,
         .writer = options.writer,
+        .diags = options.diags,
+        .report_options = options.report_options,
         .stack = try options.gpa.alloc(Value, options.stack_max),
         .strings = .init(options.gpa),
         .globals = .init(options.gpa),
@@ -117,7 +125,7 @@ pub fn allocateObject(vm: *Vm, tag: Value.Object.Tag) !*Value.Object {
 
 pub const InterpretResult = enum { ok, compile_error, runtime_error };
 
-pub fn interpret(vm: *Vm, source: [:0]const u8) !InterpretResult {
+pub fn interpret(vm: *Vm, source: *const Source) !InterpretResult {
     if (try Compilation.compile(vm, source)) |index| {
         vm.setProto(index);
         return try vm.run();

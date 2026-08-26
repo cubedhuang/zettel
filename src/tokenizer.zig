@@ -377,6 +377,7 @@ pub const Tokenizer = struct {
                     if (self.allow_semicolon and self.paren_depth == 0) {
                         result.tag = .newline;
                     } else {
+                        result.loc.start = self.index;
                         continue :state .start;
                     }
                 },

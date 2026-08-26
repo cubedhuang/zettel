@@ -1,3 +1,5 @@
+//! Compiles a single source.
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
@@ -5,6 +7,8 @@ const ArrayList = std.ArrayList;
 const Ast = @import("Ast.zig");
 const TokenIndex = Ast.TokenIndex;
 const Proto = @import("Proto.zig");
+const report = @import("report.zig");
+const Source = @import("Source.zig");
 const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Vm = @import("Vm.zig");
 const debug = @import("debug.zig");
@@ -22,8 +26,8 @@ proto_index: Proto.Index,
 proto: *Proto,
 diags: ArrayList(Error),
 
-pub fn compile(vm: *Vm, source: [:0]const u8) !?Proto.Index {
-    var tree = try Ast.parse(vm.gpa, source);
+pub fn compile(vm: *Vm, source: *const Source) !?Proto.Index {
+    var tree = try Ast.parse(vm.gpa, source.bytes);
     defer tree.deinit(vm.gpa);
 
     var arena = std.heap.ArenaAllocator.init(vm.gpa);
@@ -38,14 +42,31 @@ pub fn compile(vm: *Vm, source: [:0]const u8) !?Proto.Index {
         .diags = .empty,
     };
 
-    std.debug.print("error count: {d}\n", .{tree.errors.len});
-    for (tree.errors) |e| {
-        try tree.renderError(e, vm.writer);
-        try vm.writer.writeAll("\n");
-        try vm.writer.flush();
-    }
+    if (tree.errors.len > 0) try comp.reportParseErrors(source);
 
     return try comp.lower();
+}
+
+fn reportParseErrors(comp: *Compilation, source: *const Source) !void {
+    const tree = comp.tree;
+
+    var diagnostics: ArrayList(report.Diagnostic) = .empty;
+    try diagnostics.ensureTotalCapacityPrecise(comp.arena, tree.errors.len);
+
+    var message: std.Io.Writer.Allocating = .init(comp.arena);
+    for (tree.errors) |parse_error| {
+        message.clearRetainingCapacity();
+        tree.renderError(parse_error, &message.writer) catch return error.OutOfMemory;
+
+        const span = tree.errorSpan(parse_error);
+        diagnostics.appendAssumeCapacity(.{
+            .severity = .@"error",
+            .span = .{ .start = span.start, .end = span.end },
+            .message = try comp.arena.dupe(u8, message.written()),
+        });
+    }
+
+    try report.render(comp.vm.diags, source, diagnostics.items, comp.vm.report_options);
 }
 
 fn lower(comp: *Compilation) !?Proto.Index {

@@ -11,6 +11,12 @@ bytes: [:0]const u8,
 /// Zero-indexed line to byte offset of first character.
 line_starts: []const u32,
 
+pub const Span = struct {
+    start: u32,
+    end: u32,
+    main: u32,
+};
+
 pub fn init(gpa: Allocator, path: []const u8, bytes: [:0]const u8) Allocator.Error!Source {
     var line_starts: std.ArrayList(u32) = .empty;
     errdefer line_starts.deinit(gpa);

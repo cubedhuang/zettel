@@ -27,14 +27,9 @@ pub const Severity = enum {
     }
 };
 
-pub const Span = struct {
-    start: u32,
-    end: u32,
-};
-
 pub const Diagnostic = struct {
     severity: Severity = .@"error",
-    span: Span,
+    span: Source.Span,
     message: []const u8,
 };
 
@@ -87,6 +82,7 @@ pub fn renderDiagnostic(
     const source_end: u32 = @intCast(source.bytes.len);
     const start = @min(diagnostic.span.start, source_end);
     const end = @max(start, @min(diagnostic.span.end, source_end));
+    const main = std.math.clamp(diagnostic.span.main, start, end);
 
     const line = source.lineIndex(start);
     const line_text = source.lineSlice(line);
@@ -94,7 +90,8 @@ pub fn renderDiagnostic(
 
     const span_start = @min(start - line_start, line_text.len);
     const span_end = @max(span_start, @min(end - line_start, line_text.len));
-    const column = span_start + 1;
+    const main_column = @min(main - line_start, line_text.len);
+    const column = main_column + 1;
 
     switch (options.style) {
         .short => {
@@ -117,7 +114,7 @@ pub fn renderDiagnostic(
                 const number: u32 = @intCast(n);
                 try writeSourceLine(term, source, gutter, number, number == line);
                 if (number == line) {
-                    try writeCaret(term, diagnostic.severity, gutter, line_text, span_start, span_end);
+                    try writeCaret(term, diagnostic.severity, gutter, line_text, span_start, span_end, main_column);
                 }
             }
         },
@@ -166,7 +163,7 @@ fn writeSourceLine(term: Terminal, source: *const Source, gutter: u32, line: u32
     try term.writer.writeByte('\n');
 }
 
-/// `     |       ^`
+/// `     |     ~~^~~`
 fn writeCaret(
     term: Terminal,
     severity: Severity,
@@ -174,6 +171,7 @@ fn writeCaret(
     line_text: []const u8,
     span_start: usize,
     span_end: usize,
+    main_column: usize,
 ) Error!void {
     try term.writer.splatByteAll(' ', gutter + 1);
     try term.setColor(.red);
@@ -183,9 +181,13 @@ fn writeCaret(
     try term.writer.writeByte(' ');
     try writeIndent(term.writer, line_text[0..span_start]);
 
+    const width = @max(1, span_end - span_start);
+    const main = @min(main_column -| span_start, width - 1);
     try term.setColor(.bold);
     try term.setColor(severity.color());
-    try term.writer.splatByteAll('^', @max(1, span_end - span_start));
+    try term.writer.splatByteAll('~', main);
+    try term.writer.writeByte('^');
+    try term.writer.splatByteAll('~', width - main - 1);
     try term.setColor(.reset);
 
     try term.writer.writeByte('\n');
@@ -245,7 +247,7 @@ test "frame" {
         \\
     ,
         "a := 1\nb := 2\nc := *\nd := 4\n",
-        &.{.{ .span = .{ .start = 19, .end = 20 }, .message = "expected expression, found '*'" }},
+        &.{.{ .span = .{ .start = 19, .end = 20, .main = 19 }, .message = "expected expression, found '*'" }},
         .{},
     );
 }
@@ -260,14 +262,14 @@ test "empty span get caret" {
         \\
     ,
         "a := 1\nb := a +",
-        &.{.{ .span = .{ .start = 15, .end = 15 }, .message = "expected expression, found 'EOF'" }},
+        &.{.{ .span = .{ .start = 15, .end = 15, .main = 15 }, .message = "expected expression, found 'EOF'" }},
         .{},
     );
 }
 
 test "summary after max" {
     const many: [3]Diagnostic = @splat(.{
-        .span = .{ .start = 0, .end = 1 },
+        .span = .{ .start = 0, .end = 1, .main = 0 },
         .message = "bad",
     });
 

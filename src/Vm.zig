@@ -24,6 +24,8 @@ report_options: report.Options,
 protos: ArrayList(Proto) = .empty,
 proto: *const Proto = undefined,
 ip: usize = 0,
+/// start of current instruction, for error reporting
+start_ip: usize = 0,
 
 stack: []Value,
 /// index after top item
@@ -128,12 +130,34 @@ pub const InterpretResult = enum { ok, compile_error, runtime_error };
 pub fn interpret(vm: *Vm, source: *const Source) !InterpretResult {
     if (try Compilation.compile(vm, source)) |index| {
         vm.setProto(index);
-        return try vm.run();
+        return try vm.run(source);
     }
     return .compile_error;
 }
 
-fn run(vm: *Vm) !InterpretResult {
+fn runtimeError(
+    vm: *Vm,
+    source: *const Source,
+    comptime format: []const u8,
+    args: anytype,
+) !InterpretResult {
+    try vm.writer.flush();
+
+    var message: Writer.Allocating = .init(vm.arena);
+    defer message.deinit();
+    try message.writer.print(format, args);
+
+    try report.render(vm.diags, source, &.{.{
+        .span = vm.proto.spans.items[vm.start_ip],
+        .message = message.written(),
+    }}, vm.report_options);
+
+    vm.stack_top = 0;
+
+    return .runtime_error;
+}
+
+fn run(vm: *Vm, source: *const Source) !InterpretResult {
     while (true) {
         if (debug.TRACE_EXECUTION) {
             std.debug.print("          ", .{});
@@ -145,6 +169,7 @@ fn run(vm: *Vm) !InterpretResult {
             _ = vm.proto.disassembleInstruction(vm.ip);
         }
 
+        vm.start_ip = vm.ip;
         const op = vm.readOp();
         switch (op) {
             .pop => {
@@ -162,8 +187,9 @@ fn run(vm: *Vm) !InterpretResult {
                 if (vm.globals.get(name)) |value| {
                     vm.push(value);
                 } else {
-                    std.debug.print("undeclared variable {s}\n", .{name.asObject().data.string.bytes});
-                    return .runtime_error;
+                    return vm.runtimeError(source, "undeclared variable '{s}'", .{
+                        name.asObject().data.string.bytes,
+                    });
                 }
             },
             .define_global => {
@@ -176,8 +202,9 @@ fn run(vm: *Vm) !InterpretResult {
                 defer _ = vm.pop();
                 if (try vm.globals.fetchPut(name, vm.peek(0))) |_| {} else {
                     _ = vm.globals.remove(name);
-                    std.debug.print("undeclared variable {s}\n", .{name.asObject().data.string.bytes});
-                    return .runtime_error;
+                    return vm.runtimeError(source, "undeclared variable '{s}'", .{
+                        name.asObject().data.string.bytes,
+                    });
                 }
             },
             .bool_not => {
@@ -185,8 +212,7 @@ fn run(vm: *Vm) !InterpretResult {
             },
             .negate => {
                 if (!vm.peek(0).isNumber()) {
-                    std.debug.print("tried to negate a non-number\n", .{});
-                    return .runtime_error;
+                    return vm.runtimeError(source, "operand must be a number", .{});
                 }
                 vm.push(.fromNumber(-vm.pop().asNumber()));
             },
@@ -202,8 +228,7 @@ fn run(vm: *Vm) !InterpretResult {
             },
             .cmp_gt, .cmp_gte, .cmp_lt, .cmp_lte, .sub, .mul, .div => {
                 if (!vm.peek(0).isNumber() or !vm.peek(1).isNumber()) {
-                    std.debug.print("tried to do a numeric operation with non-numbers\n", .{});
-                    return .runtime_error;
+                    return vm.runtimeError(source, "operands must be numbers", .{});
                 }
                 const b = vm.pop();
                 const a = vm.pop();
@@ -230,8 +255,7 @@ fn run(vm: *Vm) !InterpretResult {
                     const a = vm.pop();
                     vm.push(.fromNumber(a.asNumber() + b.asNumber()));
                 } else {
-                    std.debug.print("addition is only allowed between two strings or two numbers\n", .{});
-                    return .runtime_error;
+                    return vm.runtimeError(source, "operands must be two numbers or two strings", .{});
                 }
             },
             .ret => {

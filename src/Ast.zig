@@ -15,6 +15,7 @@ pub const Tokenizer = tokenizer.Tokenizer;
 pub const TokenList = tokenizer.TokenList;
 
 const Parse = @import("Parse.zig");
+const Source = @import("Source.zig");
 
 const Ast = @This();
 
@@ -121,12 +122,6 @@ pub const Location = struct {
     line_end: usize,
 };
 
-pub const Span = struct {
-    start: u32,
-    end: u32,
-    main: u32,
-};
-
 pub fn deinit(tree: *Ast, gpa: Allocator) void {
     tree.tokens.deinit(gpa);
     tree.nodes.deinit(gpa);
@@ -195,7 +190,7 @@ pub fn errorOffset(tree: Ast, parse_error: Error) u32 {
     return if (parse_error.token_is_prev) @intCast(tree.tokenSlice(parse_error.token).len) else 0;
 }
 
-pub fn errorSpan(tree: Ast, parse_error: Error) Span {
+pub fn errorSpan(tree: Ast, parse_error: Error) Source.Span {
     const start = tree.tokenStart(parse_error.token) + tree.errorOffset(parse_error);
     const end = if (parse_error.token_is_prev)
         start
@@ -1294,7 +1289,7 @@ pub const Node = struct {
     };
 };
 
-pub fn nodeToSpan(tree: *const Ast, node: Ast.Node.Index) Span {
+pub fn nodeToSpan(tree: *const Ast, node: Ast.Node.Index) Source.Span {
     return tokensToSpan(
         tree,
         tree.firstToken(node),
@@ -1303,11 +1298,11 @@ pub fn nodeToSpan(tree: *const Ast, node: Ast.Node.Index) Span {
     );
 }
 
-pub fn tokenToSpan(tree: *const Ast, token: Ast.TokenIndex) Span {
+pub fn tokenToSpan(tree: *const Ast, token: Ast.TokenIndex) Source.Span {
     return tokensToSpan(tree, token, token, token);
 }
 
-pub fn tokensToSpan(tree: *const Ast, start: Ast.TokenIndex, end: Ast.TokenIndex, main: Ast.TokenIndex) Span {
+pub fn tokensToSpan(tree: *const Ast, start: Ast.TokenIndex, end: Ast.TokenIndex, main: Ast.TokenIndex) Source.Span {
     var start_tok = start;
     var end_tok = end;
 
@@ -1323,5 +1318,5 @@ pub fn tokensToSpan(tree: *const Ast, start: Ast.TokenIndex, end: Ast.TokenIndex
     }
     const start_off = tree.tokenStart(start_tok);
     const end_off = tree.tokenStart(end_tok) + @as(u32, @intCast(tree.tokenSlice(end_tok).len));
-    return Span{ .start = start_off, .end = end_off, .main = tree.tokenStart(main) };
+    return .{ .start = start_off, .end = end_off, .main = tree.tokenStart(main) };
 }

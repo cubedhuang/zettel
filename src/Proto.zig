@@ -4,6 +4,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+const Source = @import("Source.zig");
 const Vm = @import("Vm.zig");
 const Value = @import("Value.zig");
 
@@ -43,29 +44,30 @@ pub const OpCode = enum(u8) {
 const Proto = @This();
 
 code: ArrayList(OpCode),
-offsets: ArrayList(usize),
+/// TODO: run-length encoding or something similar
+spans: ArrayList(Source.Span),
 constants: ArrayList(Value),
 
 pub const empty = Proto{
     .code = .empty,
-    .offsets = .empty,
+    .spans = .empty,
     .constants = .empty,
 };
 
 pub fn deinit(p: *Proto, gpa: Allocator) void {
     p.code.deinit(gpa);
-    p.offsets.deinit(gpa);
+    p.spans.deinit(gpa);
     p.constants.deinit(gpa);
     p.* = undefined;
 }
 
-pub fn write(p: *Proto, gpa: Allocator, op: OpCode, offset: usize) !void {
+pub fn write(p: *Proto, gpa: Allocator, op: OpCode, span: Source.Span) !void {
     try p.code.append(gpa, op);
-    try p.offsets.append(gpa, offset);
+    try p.spans.append(gpa, span);
 }
 
-pub fn writeByte(p: *Proto, gpa: Allocator, byte: u8, offset: usize) !void {
-    return p.write(gpa, @enumFromInt(byte), offset);
+pub fn writeByte(p: *Proto, gpa: Allocator, byte: u8, span: Source.Span) !void {
+    return p.write(gpa, @enumFromInt(byte), span);
 }
 
 pub fn addConstant(p: *Proto, gpa: Allocator, value: Value) !u8 {
@@ -84,10 +86,10 @@ pub fn disassemble(p: Proto, name: []const u8) void {
 
 pub fn disassembleInstruction(p: Proto, offset: usize) usize {
     std.debug.print("{d:0>4} ", .{offset});
-    if (offset > 0 and p.offsets.items[offset] == p.offsets.items[offset - 1]) {
+    if (offset > 0 and std.meta.eql(p.spans.items[offset], p.spans.items[offset - 1])) {
         std.debug.print("   | ", .{});
     } else {
-        std.debug.print("{d:>4} ", .{p.offsets.items[offset]});
+        std.debug.print("{d:>4} ", .{p.spans.items[offset].start});
     }
 
     const instruction = p.code.items[offset];
@@ -119,7 +121,7 @@ pub fn disassembleInstruction(p: Proto, offset: usize) usize {
         .set_global,
         => {
             const index = @intFromEnum(p.code.items[offset + 1]);
-            std.debug.print("{s:<16} {d:>4} '{f}'\n", .{ @tagName(instruction), index, p.constants.items[index] });
+            std.debug.print("{s:<16} {d:>4} `{f}`\n", .{ @tagName(instruction), index, p.constants.items[index] });
             return offset + 2;
         },
         _ => {

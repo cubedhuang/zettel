@@ -86,15 +86,15 @@ fn reportErrors(comp: *Compilation, source: *const Source) !void {
     try report.render(comp.vm.diags, source, diagnostics.items, comp.vm.report_options);
 }
 
-fn diagnostic(comp: *Compilation, span: Ast.Span, message: []const u8) Allocator.Error!report.Diagnostic {
+fn diagnostic(comp: *Compilation, span: Source.Span, message: []const u8) Allocator.Error!report.Diagnostic {
     return .{
         .severity = .@"error",
-        .span = .{ .start = span.start, .end = span.end },
+        .span = span,
         .message = try comp.arena.dupe(u8, message),
     };
 }
 
-fn errorSpan(comp: *Compilation, compile_error: Error) Ast.Span {
+fn errorSpan(comp: *Compilation, compile_error: Error) Source.Span {
     return switch (compile_error.location) {
         .node => |node| comp.tree.nodeToSpan(node),
         .token => |token| comp.tree.tokenToSpan(token),
@@ -118,8 +118,9 @@ fn lower(comp: *Compilation) !Proto.Index {
         // std.debug.print("index: {d}, tag: {s}\n", .{ index, @tagName(comp.tree.nodeTag(index)) });
         try comp.lowerStmt(stmt);
     }
-    try comp.proto.write(comp.vm.gpa, .push_nil, 0);
-    try comp.proto.write(comp.vm.gpa, .ret, 0);
+    const eof = comp.tree.tokenToSpan(@intCast(comp.tree.tokens.len - 1));
+    try comp.proto.write(comp.vm.gpa, .push_nil, eof);
+    try comp.proto.write(comp.vm.gpa, .ret, eof);
 
     return proto_index;
 }
@@ -178,7 +179,7 @@ fn lowerSimpleStmt(comp: *Compilation, node: Ast.Node.Index) !void {
 
         else => {
             try comp.lowerExpr(node);
-            try comp.proto.write(comp.vm.gpa, .pop, comp.tree.nodeMainToken(node));
+            try comp.proto.write(comp.vm.gpa, .pop, comp.tree.nodeToSpan(node));
         },
     }
 }
@@ -187,9 +188,7 @@ fn lowerDecl(comp: *Compilation, node: Ast.Node.Index) !void {
     const name, const value = comp.tree.nodeData(node).token_and_node;
     try comp.lowerExpr(value);
     const name_constant = try comp.identifierConstant(name);
-    const main_token = comp.tree.nodeMainToken(node);
-    const offset = comp.tree.tokenStart(main_token);
-    try comp.defineVariable(name_constant, offset);
+    try comp.defineVariable(name_constant, comp.tree.tokenToSpan(name));
 }
 
 fn lowerAssign(comp: *Compilation, node: Ast.Node.Index) !void {
@@ -281,39 +280,30 @@ fn lowerExpr(comp: *Compilation, node: Ast.Node.Index) Allocator.Error!void {
             const token = comp.tree.nodeMainToken(node);
             try comp.namedVariable(token, .get);
         },
-        .literal_nil => {
-            const token = comp.tree.nodeMainToken(node);
-            try comp.proto.write(comp.vm.gpa, .push_nil, token);
-        },
-        .literal_true => {
-            const token = comp.tree.nodeMainToken(node);
-            try comp.proto.write(comp.vm.gpa, .push_true, token);
-        },
-        .literal_false => {
-            const token = comp.tree.nodeMainToken(node);
-            try comp.proto.write(comp.vm.gpa, .push_false, token);
-        },
+        .literal_nil => try comp.proto.write(comp.vm.gpa, .push_nil, comp.tree.nodeToSpan(node)),
+        .literal_true => try comp.proto.write(comp.vm.gpa, .push_true, comp.tree.nodeToSpan(node)),
+        .literal_false => try comp.proto.write(comp.vm.gpa, .push_false, comp.tree.nodeToSpan(node)),
         .literal_number => {
             const token = comp.tree.nodeMainToken(node);
-            const offset = comp.tree.tokenStart(token);
+            const span = comp.tree.nodeToSpan(node);
             const result = std.fmt.parseFloat(f64, comp.tree.tokenSlice(token)) catch |err| switch (err) {
                 error.InvalidCharacter => unreachable, // validated by tokenizer
             };
             const constant_index = try comp.proto.addConstant(comp.vm.gpa, .fromNumber(result));
-            try comp.proto.write(comp.vm.gpa, .push_constant, offset);
-            try comp.proto.writeByte(comp.vm.gpa, constant_index, offset);
+            try comp.proto.write(comp.vm.gpa, .push_constant, span);
+            try comp.proto.writeByte(comp.vm.gpa, constant_index, span);
         },
         .literal_string => {
             const token = comp.tree.nodeMainToken(node);
-            const offset = comp.tree.tokenStart(token);
+            const span = comp.tree.nodeToSpan(node);
             const data = std.zig.string_literal.parseAlloc(comp.vm.gpa, comp.tree.tokenSlice(token)) catch |err| switch (err) {
                 error.InvalidLiteral => std.debug.panic("invalid string literal", .{}),
                 error.OutOfMemory => return error.OutOfMemory,
             };
             const string = try comp.vm.takeString(data);
             const constant_index = try comp.proto.addConstant(comp.vm.gpa, .fromObject(string));
-            try comp.proto.write(comp.vm.gpa, .push_constant, offset);
-            try comp.proto.writeByte(comp.vm.gpa, constant_index, offset);
+            try comp.proto.write(comp.vm.gpa, .push_constant, span);
+            try comp.proto.writeByte(comp.vm.gpa, constant_index, span);
         },
 
         else => std.debug.panic("TODO: lower {s}", .{@tagName(comp.tree.nodeTag(node))}),
@@ -324,17 +314,13 @@ fn lowerBinaryOp(comp: *Compilation, node: Ast.Node.Index, op: Proto.OpCode) !vo
     const lhs, const rhs = comp.tree.nodeData(node).node_and_node;
     try comp.lowerExpr(lhs);
     try comp.lowerExpr(rhs);
-    const main_token = comp.tree.nodeMainToken(node);
-    const offset = comp.tree.tokenStart(main_token);
-    try comp.proto.write(comp.vm.gpa, op, offset);
+    try comp.proto.write(comp.vm.gpa, op, comp.tree.nodeToSpan(node));
 }
 
 fn lowerUnaryOp(comp: *Compilation, node: Ast.Node.Index, op: Proto.OpCode) !void {
     const operand = comp.tree.nodeData(node).node;
     try comp.lowerExpr(operand);
-    const main_token = comp.tree.nodeMainToken(node);
-    const offset = comp.tree.tokenStart(main_token);
-    try comp.proto.write(comp.vm.gpa, op, offset);
+    try comp.proto.write(comp.vm.gpa, op, comp.tree.nodeToSpan(node));
 }
 
 fn identifierConstant(comp: *Compilation, token_index: TokenIndex) !u8 {
@@ -345,17 +331,17 @@ fn identifierConstant(comp: *Compilation, token_index: TokenIndex) !u8 {
 
 fn namedVariable(comp: *Compilation, token_index: TokenIndex, access: enum { set, get }) !void {
     const constant_index = try comp.identifierConstant(token_index);
-    const offset = comp.tree.tokenStart(token_index);
+    const span = comp.tree.tokenToSpan(token_index);
     try comp.proto.write(comp.vm.gpa, switch (access) {
         .get => .get_global,
         .set => .set_global,
-    }, offset);
-    try comp.proto.writeByte(comp.vm.gpa, constant_index, offset);
+    }, span);
+    try comp.proto.writeByte(comp.vm.gpa, constant_index, span);
 }
 
-fn defineVariable(comp: *Compilation, global: u8, offset: usize) !void {
-    try comp.proto.write(comp.vm.gpa, .define_global, offset);
-    try comp.proto.writeByte(comp.vm.gpa, global, offset);
+fn defineVariable(comp: *Compilation, global: u8, span: Source.Span) !void {
+    try comp.proto.write(comp.vm.gpa, .define_global, span);
+    try comp.proto.writeByte(comp.vm.gpa, global, span);
 }
 
 fn setCurrentProto(comp: *Compilation, index: Proto.Index) void {

@@ -373,7 +373,7 @@ fn expectSimpleStmt(p: *Parse) !Node.Index {
 
     if (p.eatToken(.colon_equal)) |colon_equal| {
         if (p.nodeTag(lhs) != .identifier) {
-            try p.warn(.invalid_decl_target);
+            try p.warnMsg(.{ .tag = .invalid_decl_target, .token = p.tok_i - 1 });
             return error.ParseError;
         }
         const rhs = try p.expectExpr();

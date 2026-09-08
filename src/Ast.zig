@@ -115,13 +115,6 @@ pub fn isTokenPrecededByTags(
     );
 }
 
-pub const Location = struct {
-    line: usize,
-    column: usize,
-    line_start: usize,
-    line_end: usize,
-};
-
 pub fn deinit(tree: *Ast, gpa: Allocator) void {
     tree.tokens.deinit(gpa);
     tree.nodes.deinit(gpa);

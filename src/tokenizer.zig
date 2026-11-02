@@ -30,6 +30,7 @@ pub const Token = struct {
         .{ "switch", .keyword_switch },
         .{ "true", .keyword_true },
         .{ "try", .keyword_try },
+        .{ "while", .keyword_while },
     });
 
     pub fn getKeyword(bytes: []const u8) ?Tag {
@@ -128,6 +129,7 @@ pub const Token = struct {
         keyword_switch,
         keyword_true,
         keyword_try,
+        keyword_while,
 
         pub fn lexeme(tag: Tag) ?[]const u8 {
             return switch (tag) {
@@ -224,6 +226,7 @@ pub const Token = struct {
                 .keyword_switch => "switch",
                 .keyword_true => "true",
                 .keyword_try => "try",
+                .keyword_while => "while",
             };
         }
 

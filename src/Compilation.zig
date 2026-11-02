@@ -10,9 +10,7 @@ const TokenIndex = Ast.TokenIndex;
 const Proto = @import("Proto.zig");
 const report = @import("report.zig");
 const Source = @import("Source.zig");
-const Tokenizer = @import("tokenizer.zig").Tokenizer;
 const Vm = @import("Vm.zig");
-const debug = @import("debug.zig");
 
 pub const Error = struct {
     tag: Tag,
@@ -240,6 +238,10 @@ fn lowerAssignOp(comp: *Compilation, node: Ast.Node.Index, op: anytype) !void {
 ///      / KEYWORD_This
 fn lowerExpr(comp: *Compilation, node: Ast.Node.Index) Allocator.Error!void {
     switch (comp.tree.nodeTag(node)) {
+        .grouped_expression => {
+            const expr, _ = comp.tree.nodeData(node).node_and_token;
+            return comp.lowerExpr(expr);
+        },
         // .shl => return comp.lowerBinaryOp(node, .shl),
         // .shr => return comp.lowerBinaryOp(node, .shr),
 

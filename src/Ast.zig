@@ -192,44 +192,6 @@ pub fn errorSpan(tree: Ast, parse_error: Error) Source.Span {
     return .{ .start = start, .end = end, .main = start };
 }
 
-pub fn tokenLocation(self: Ast, start_offset: ByteOffset, token_index: TokenIndex) Location {
-    var loc = Location{
-        .line = 0,
-        .column = 0,
-        .line_start = start_offset,
-        .line_end = self.source.len,
-    };
-    const token_start = self.tokenStart(token_index);
-
-    // Scan to by line until we go past the token start
-    while (std.mem.findScalarPos(u8, self.source, loc.line_start, '\n')) |i| {
-        if (i >= token_start) {
-            break; // Went past
-        }
-        loc.line += 1;
-        loc.line_start = i + 1;
-    }
-
-    const offset = loc.line_start;
-    for (self.source[offset..], 0..) |c, i| {
-        if (i + offset == token_start) {
-            loc.line_end = i + offset;
-            while (loc.line_end < self.source.len and self.source[loc.line_end] != '\n') {
-                loc.line_end += 1;
-            }
-            return loc;
-        }
-        if (c == '\n') {
-            loc.line += 1;
-            loc.column = 0;
-            loc.line_start = i + 1;
-        } else {
-            loc.column += 1;
-        }
-    }
-    return loc;
-}
-
 pub fn tokenSlice(tree: Ast, token_index: TokenIndex) []const u8 {
     const token_tag = tree.tokenTag(token_index);
 
@@ -257,17 +219,17 @@ pub fn extraDataSliceWithLen(tree: Ast, start: ExtraIndex, len: u32, comptime T:
 }
 
 pub fn extraData(tree: Ast, index: ExtraIndex, comptime T: type) T {
-    const fields = std.meta.fields(T);
+    const info = @typeInfo(T).@"struct";
     var result: T = undefined;
-    inline for (fields, 0..) |field, i| {
-        @field(result, field.name) = switch (field.type) {
+    inline for (info.field_names, info.field_types, 0..) |field_name, field_type, i| {
+        @field(result, field_name) = switch (field_type) {
             Node.Index,
             Node.OptionalIndex,
             OptionalTokenIndex,
             ExtraIndex,
             => @enumFromInt(tree.extra_data[@intFromEnum(index) + i]),
             TokenIndex => tree.extra_data[@intFromEnum(index) + i],
-            else => @compileError("unexpected field type: " ++ @typeName(field.type)),
+            else => @compileError("unexpected field type: " ++ @typeName(field_type)),
         };
     }
     return result;
@@ -723,7 +685,7 @@ pub fn lastToken(tree: Ast, node: Node.Index) TokenIndex {
         },
         .@"if" => {
             _, const extra_index = tree.nodeData(n).node_and_extra;
-            const extra = tree.extraData(extra_index, Node.If);
+            const extra = tree.extraData(extra_index, Node.IfWhile);
             n = extra.else_block.unwrap() orelse extra.then_block;
         },
         .@"for" => {
@@ -1268,7 +1230,7 @@ pub const Node = struct {
         end: Node.Index,
     };
 
-    pub const If = struct {
+    pub const IfWhile = struct {
         init: OptionalIndex,
         then_block: Index,
         else_block: OptionalIndex,

@@ -17,7 +17,7 @@ class Fib {
 }
 
 fib := Fib.init()
-for n := fib.next(); n < 1000; {
+while n := fib.next(); n < 1000 {
   print(n)
 }
 ```

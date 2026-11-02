@@ -5,7 +5,6 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
 const Source = @import("Source.zig");
-const Vm = @import("Vm.zig");
 const Value = @import("Value.zig");
 
 pub const Index = enum(u32) { _ };

@@ -3,9 +3,52 @@ package compiler
 // Design inspired by Zig's https://codeberg.org/ziglang/zig/src/branch/master/lib/std/zig/Ast.zig
 Ast :: struct {
 	source: string,
-	tokens: #soa[dynamic]Token,
-	nodes:  #soa[dynamic]Node,
-	extra:  [dynamic]u32,
+	tokens: #soa[]Token,
+	nodes:  #soa[]Node,
+	extra:  []u32,
+	errors: []Error,
+}
+
+Error :: struct {
+	tag:      Error_Tag,
+	token:    Token_Index,
+	// Only used for `Expected_Token`.
+	expected: Token_Tag,
+}
+
+Error_Tag :: enum u8 {
+	Expected_Expression,
+	Expected_Token,
+}
+
+ast_destroy :: proc(ast: ^Ast) {
+	delete(ast.tokens)
+	delete(ast.nodes)
+	delete(ast.extra)
+	delete(ast.errors)
+}
+
+extra_data_slice :: proc(ast: Ast, range: Node_Range, $T: typeid) -> []T {
+	return transmute([]T)ast.extra[range.start:range.end]
+}
+
+root_statements :: proc(ast: Ast) -> []Node_Index {
+	return extra_data_slice(ast, ast.nodes[0].data.extra_range, Node_Index)
+}
+
+token_text :: proc(ast: Ast, index: Token_Index) -> string {
+	tag := ast.tokens[index].tag
+	if lexeme := token_lexemes[tag]; len(lexeme) > 0 {
+		return lexeme
+	}
+
+	start := ast.tokens[index].start
+	tokenizer := Tokenizer {
+		source = ast.source,
+		offset = int(start),
+	}
+	scan(&tokenizer)
+	return ast.source[start:tokenizer.offset]
 }
 
 // Index into Ast.tokens.
@@ -21,11 +64,39 @@ Node :: struct {
 	data:       Node_Data,
 }
 
-Node_Tag :: enum {
-	// Guaranteed to be at index 0 of the node list. `data` is an `extra_range` of statements.
+Node_Tag :: enum u8 {
+	// Guaranteed to be at index 0 of the node list.
+	//
+	// The `data` field is an `extra_range` of statements.
 	//
 	// The `main_token` field is 0.
 	Root,
+	// The `data` field is unused.
+	Number_Literal,
+	// `(node)`.
+	//
+	// The `data` field is `token_and_node`. The token is the `)` and the node is the sub-expression.
+	//
+	// The `main_token` field is the `(`.
+	Grouped,
+	// `-node`.
+	//
+	// The `data` field is the operand.
+	//
+	// The `main_token` field is the `-`.
+	Negate,
+	// `lhs + rhs`.
+	//
+	// For all binary operations, the `data` field is `node_and_node` with both operands.
+	//
+	// The `main_token` field is the operator.
+	Add,
+	// `lhs - rhs`
+	Sub,
+	// `lhs * rhs`
+	Mul,
+	// `lhs / rhs`
+	Div,
 }
 
 Node_Data :: struct #raw_union {
@@ -42,7 +113,9 @@ Node_Data :: struct #raw_union {
 		token: Token_Index,
 		node:  Node_Index,
 	},
-	extra_range:    struct {
-		start, end: Extra_Index,
-	},
+	extra_range:    Node_Range,
+}
+
+Node_Range :: struct {
+	start, end: Extra_Index,
 }

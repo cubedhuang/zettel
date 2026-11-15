@@ -36,10 +36,50 @@ Token_Tag :: enum u8 {
 	Identifier,
 }
 
+token_lexemes := #partial [Token_Tag]string {
+	// Symbols
+	.Eq                  = "=",
+	.Plus                = "+",
+	.Minus               = "-",
+	.Star                = "*",
+	.Slash               = "/",
+	.Semi                = ";",
+	.Colon               = ":",
+	.Comma               = ",",
+	.Paren_Open          = "(",
+	.Paren_Close         = ")",
+	.Brace_Open          = "{",
+	.Brace_Close         = "}",
+	// Keywords
+	.Keyword_If          = "if",
+	.Keyword_Else        = "else",
+	.Keyword_While       = "while",
+	.Keyword_For         = "for",
+	.Keyword_Fn          = "fn",
+	.Keyword_Return      = "return",
+	.Keyword_Class       = "class",
+	.Keyword_Constructor = "constructor",
+}
+
 Tokenizer :: struct {
 	source:           string,
 	offset:           int,
 	insert_semicolon: bool,
+}
+
+tokenize :: proc(source: string) -> #soa[]Token {
+	tokens: #soa[dynamic]Token
+
+	t := Tokenizer {
+		source = source,
+	}
+	for {
+		token := scan(&t)
+		append(&tokens, token)
+		if token.tag == .EOF do break
+	}
+
+	return tokens[:]
 }
 
 scan :: proc(t: ^Tokenizer) -> (token: Token) {
@@ -92,6 +132,8 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 		token.tag = .Brace_Open
 	case '}':
 		token.tag = .Brace_Close
+	case '\n':
+		token.tag = .Semi
 
 	// TODO: floating point and whatnot. for now we just have integers
 	case '0' ..= '9':

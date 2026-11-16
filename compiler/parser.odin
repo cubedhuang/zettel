@@ -42,15 +42,30 @@ parse_root :: proc(p: ^Parser) {
 
 // ClassBody <- Stmt*
 parse_class_body :: proc(p: ^Parser) -> Node_Range {
+	return parse_stmts(p, .EOF)
+}
+
+// Stmt*
+parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 	scratch_top := len(p.scratch)
 	defer non_zero_resize(&p.scratch, scratch_top)
 
-	for peek_tag(p) != .EOF {
+	for {
+		tag := peek_tag(p)
+		if tag == end || tag == .EOF do break
+
 		// empty statement
-		if peek_tag(p) == .Semi {
+		if tag == .Semi {
 			advance(p)
 			continue
 		}
+		// not in a `{}` block
+		if tag == .Brace_Close {
+			add_error(p, {tag = .Expected_Expression})
+			advance(p)
+			continue
+		}
+
 		if statement, ok := parse_stmt(p); ok {
 			append(&p.scratch, statement)
 		} else {
@@ -61,11 +76,29 @@ parse_class_body :: proc(p: ^Parser) -> Node_Range {
 	return make_range(p, p.scratch[scratch_top:])
 }
 
-// Stmt <- Expr SEMI
+// Stmt <- Block
+//       / SimpleStmt
+//
+// Block <- BRACE_OPEN Stmt* BRACE_CLOSE
+//
+// SimpleStmt <- Expr SEMI
 parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	#partial switch peek_tag(p) {
+	case .Brace_Open:
+		return parse_block(p)
+	}
+
 	node = parse_expression(p) or_return
 	expect(p, .Semi) or_return
 	return node, true
+}
+
+// Block <- BRACE_OPEN Stmt* BRACE_CLOSE
+parse_block :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	open := expect(p, .Brace_Open) or_return
+	range := parse_stmts(p, .Brace_Close)
+	expect(p, .Brace_Close) or_return
+	return add_node(p, {tag = .Block, main_token = open, data = {extra_range = range}}), true
 }
 
 // Expr <- Expr (BinaryOp Expr)?
@@ -171,6 +204,7 @@ expect :: proc(p: ^Parser, tag: Token_Tag) -> (token: Token_Index, ok: bool) {
 
 synchronize :: proc(p: ^Parser) {
 	for peek_tag(p) != .EOF {
+		if peek_tag(p) == .Brace_Close do return
 		if p.tokens[advance(p)].tag == .Semi do return
 	}
 }

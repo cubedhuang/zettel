@@ -24,6 +24,10 @@ root_statements :: proc(ast: Ast) -> []Node_Index {
 	return extra_data_slice(ast, ast.nodes[0].data.extra_range, Node_Index)
 }
 
+block_statements :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
+	return extra_data_slice(ast, ast.nodes[index].data.extra_range, Node_Index)
+}
+
 token_text :: proc(ast: Ast, index: Token_Index) -> string {
 	tag := ast.tokens[index].tag
 	if lexeme := token_lexemes[tag]; len(lexeme) > 0 {
@@ -59,6 +63,18 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is 0.
 	Root,
+
+	// ---------- Statements ----------
+
+	// `{ ... }`.
+	//
+	// The `data` field is `extra_range`.
+	//
+	// The `main_token` field is the `{`.
+	Block,
+
+	// ---------- Expressions ----------
+
 	// The `data` field is unused.
 	Number_Literal,
 	// `(node)`.

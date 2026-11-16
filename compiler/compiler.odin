@@ -27,11 +27,7 @@ compile :: proc(ast: Ast) -> (module: bytecode.Module, error: Compile_Error) {
 	}
 	defer delete(c.constant_locations)
 
-	for statement in root_statements(ast) {
-		compile_expression(&c, statement)
-		emit(&c, .Print)
-	}
-	emit(&c, .Return)
+	compile_root(&c)
 
 	if c.error != .None {
 		delete(c.code)
@@ -41,11 +37,29 @@ compile :: proc(ast: Ast) -> (module: bytecode.Module, error: Compile_Error) {
 	return {main = {code = c.code[:], constants = c.constants[:]}}, .None
 }
 
+compile_root :: proc(c: ^Compiler) {
+	for statement in root_statements(c.ast) {
+		compile_statement(c, statement)
+	}
+	emit(c, .Return)
+}
+
+compile_statement :: proc(c: ^Compiler, index: Node_Index) {
+	node := c.ast.nodes[index]
+	#partial switch node.tag {
+	case .Block:
+		for statement in block_statements(c.ast, index) {
+			compile_statement(c, statement)
+		}
+	case:
+		compile_expression(c, index)
+		emit(c, .Print)
+	}
+}
+
 compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	node := c.ast.nodes[index]
-	switch node.tag {
-	case .Root:
-		unreachable()
+	#partial switch node.tag {
 	case .Number_Literal:
 		// TODO: better numbers
 		value, _ := strconv.parse_f64(token_text(c.ast, node.main_token))
@@ -68,6 +82,8 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		case .Div:
 			emit(c, .Div)
 		}
+	case:
+		unreachable()
 	}
 }
 

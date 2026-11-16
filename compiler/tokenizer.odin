@@ -61,6 +61,37 @@ token_lexemes := #partial [Token_Tag]string {
 	.Keyword_Constructor = "constructor",
 }
 
+token_names := [Token_Tag]string {
+	// Special states
+	.Invalid             = "an invalid token",
+	.EOF                 = "end of input",
+	// Symbols
+	.Eq                  = "'='",
+	.Plus                = "'+'",
+	.Minus               = "'-'",
+	.Star                = "'*'",
+	.Slash               = "'/'",
+	.Semi                = "';'",
+	.Colon               = "':'",
+	.Comma               = "','",
+	.Paren_Open          = "'('",
+	.Paren_Close         = "')'",
+	.Brace_Open          = "'{'",
+	.Brace_Close         = "'}'",
+	// Keywords
+	.Keyword_If          = "'if'",
+	.Keyword_Else        = "'else'",
+	.Keyword_While       = "'while'",
+	.Keyword_For         = "'for'",
+	.Keyword_Fn          = "'fn'",
+	.Keyword_Return      = "'return'",
+	.Keyword_Class       = "'class'",
+	.Keyword_Constructor = "'constructor'",
+	// Dynamic content
+	.Number              = "a number",
+	.Identifier          = "an identifier",
+}
+
 Tokenizer :: struct {
 	source:           string,
 	offset:           int,

@@ -9,18 +9,6 @@ Ast :: struct {
 	errors: []Error,
 }
 
-Error :: struct {
-	tag:      Error_Tag,
-	token:    Token_Index,
-	// Only used for `Expected_Token`.
-	expected: Token_Tag,
-}
-
-Error_Tag :: enum u8 {
-	Expected_Expression,
-	Expected_Token,
-}
-
 ast_destroy :: proc(ast: ^Ast) {
 	delete(ast.tokens)
 	delete(ast.nodes)
@@ -118,4 +106,16 @@ Node_Data :: struct #raw_union {
 
 Node_Range :: struct {
 	start, end: Extra_Index,
+}
+
+Error :: struct {
+	tag:      Error_Tag,
+	token:    Token_Index,
+	// Only used for `Expected_Token`.
+	expected: Token_Tag,
+}
+
+Error_Tag :: enum u8 {
+	Expected_Expression,
+	Expected_Token,
 }

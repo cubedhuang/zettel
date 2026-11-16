@@ -10,7 +10,7 @@ class Fib {
   }
   fn next(self) {
     self.a, self.b = self.b, self.a + self.b
-    return t
+    return self.a
   }
 }
 

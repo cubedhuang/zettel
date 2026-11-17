@@ -1,0 +1,51 @@
+package report
+
+import "core:terminal/ansi"
+
+Color :: enum u8 {
+	Reset,
+	Bold,
+	Faint,
+	Underline,
+	Black,
+	Red,
+	Green,
+	Yellow,
+	Blue,
+	Magenta,
+	Cyan,
+	White,
+	Default,
+	Bright_Black,
+	Bright_Red,
+	Bright_Green,
+	Bright_Yellow,
+	Bright_Blue,
+	Bright_Magenta,
+	Bright_Cyan,
+	Bright_White,
+}
+
+color_codes := [Color]string {
+	.Reset          = ansi.RESET,
+	.Bold           = ansi.BOLD,
+	.Faint          = ansi.FAINT,
+	.Underline      = ansi.UNDERLINE,
+	.Black          = ansi.FG_BLACK,
+	.Red            = ansi.FG_RED,
+	.Green          = ansi.FG_GREEN,
+	.Yellow         = ansi.FG_YELLOW,
+	.Blue           = ansi.FG_BLUE,
+	.Magenta        = ansi.FG_MAGENTA,
+	.Cyan           = ansi.FG_CYAN,
+	.White          = ansi.FG_WHITE,
+	.Default        = ansi.FG_DEFAULT,
+	.Bright_Black   = ansi.FG_BRIGHT_BLACK,
+	.Bright_Red     = ansi.FG_BRIGHT_RED,
+	.Bright_Green   = ansi.FG_BRIGHT_GREEN,
+	.Bright_Yellow  = ansi.FG_BRIGHT_YELLOW,
+	.Bright_Blue    = ansi.FG_BRIGHT_BLUE,
+	.Bright_Magenta = ansi.FG_BRIGHT_MAGENTA,
+	.Bright_Cyan    = ansi.FG_BRIGHT_CYAN,
+	.Bright_White   = ansi.FG_BRIGHT_WHITE,
+}

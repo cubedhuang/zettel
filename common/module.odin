@@ -1,4 +1,6 @@
-package bytecode
+// The common package contains data structures shared between the compiler and runtime, including
+// the bytecode format and debugging information like `Span`s.
+package common
 
 Module :: struct {
 	main: Chunk,
@@ -6,6 +8,10 @@ Module :: struct {
 
 Chunk :: struct {
 	code:         []u8,
+	// The source of each byte in `code`.
+	//
+	// TODO: make this more space-efficient
+	spans:        []Span,
 	constants:    []Constant,
 	string_bytes: []u8,
 }
@@ -48,6 +54,7 @@ module_destroy :: proc(module: ^Module) {
 
 chunk_destroy :: proc(chunk: ^Chunk) {
 	delete(chunk.code)
+	delete(chunk.spans)
 	delete(chunk.constants)
 	delete(chunk.string_bytes)
 }

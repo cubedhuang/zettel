@@ -1,8 +1,11 @@
 package compiler
 
+import "core:strings"
+
 // `Parser` holds intermediate parsing data. After parsing, it's converted into
 // an `Ast`.
 Parser :: struct {
+	// Externally owned.
 	source:  string,
 	tokens:  #soa[]Token,
 	nodes:   #soa[dynamic]Node,
@@ -55,7 +58,7 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 		if tag == end || tag == .EOF do break
 
 		// empty statement
-		if tag == .Semi {
+		if tag == .Semi || tag == .Newline {
 			advance(p)
 			continue
 		}
@@ -89,7 +92,7 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	}
 
 	node = parse_expression(p) or_return
-	expect(p, .Semi) or_return
+	expect_stmt_end(p) or_return
 	return node, true
 }
 
@@ -186,15 +189,9 @@ advance :: proc(p: ^Parser) -> (i: Token_Index) {
 	i = Token_Index(p.i)
 	if peek_tag(p) != .EOF do p.i += 1
 	if p.depth > 0 {
-		for is_newline_semi(p, p.i) do p.i += 1
+		for peek_tag(p) == .Newline do p.i += 1
 	}
 	return
-}
-
-is_newline_semi :: proc(p: ^Parser, i: int) -> bool {
-	if p.tokens[i].tag != .Semi do return false
-	start := int(p.tokens[i].start)
-	return start >= len(p.source) || p.source[start] == '\n'
 }
 
 expect :: proc(p: ^Parser, tag: Token_Tag) -> (token: Token_Index, ok: bool) {
@@ -205,10 +202,22 @@ expect :: proc(p: ^Parser, tag: Token_Tag) -> (token: Token_Index, ok: bool) {
 	return advance(p), true
 }
 
+expect_stmt_end :: proc(p: ^Parser) -> (ok: bool) {
+	#partial switch peek_tag(p) {
+	case .Semi, .Newline:
+		advance(p)
+		return true
+	case .Paren_Close, .Brace_Close, .EOF:
+		return true
+	}
+	return false
+}
+
 synchronize :: proc(p: ^Parser) {
 	for peek_tag(p) != .EOF {
 		if peek_tag(p) == .Brace_Close do return
-		if p.tokens[advance(p)].tag == .Semi do return
+		tag := p.tokens[advance(p)].tag
+		if tag == .Semi || tag == .Newline do return
 	}
 }
 
@@ -220,5 +229,16 @@ add_node :: proc(p: ^Parser, node: Node) -> Node_Index {
 add_error :: proc(p: ^Parser, error: Error) {
 	error := error
 	error.token = Token_Index(p.i)
+	if previous := p.i - 1; previous >= 0 {
+		tag := p.tokens[previous].tag
+		start, end := p.tokens[previous].start, p.tokens[p.i].start
+		if tag != .Semi &&
+		   tag != .Newline &&
+		   tag != .Brace_Open &&
+		   strings.contains_rune(p.source[start:end], '\n') {
+			error.after_previous = true
+			error.previous = Token_Index(previous)
+		}
+	}
 	append(&p.errors, error)
 }

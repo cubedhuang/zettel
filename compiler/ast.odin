@@ -1,7 +1,11 @@
 package compiler
 
+import "../common"
+import "core:strings"
+
 // Design inspired by Zig's https://codeberg.org/ziglang/zig/src/branch/master/lib/std/zig/Ast.zig
 Ast :: struct {
+	// Externally owned.
 	source: string,
 	tokens: #soa[]Token,
 	nodes:  #soa[]Node,
@@ -41,6 +45,96 @@ token_text :: proc(ast: Ast, index: Token_Index) -> string {
 	}
 	scan(&tokenizer)
 	return ast.source[start:tokenizer.offset]
+}
+
+token_span :: proc(ast: Ast, index: Token_Index) -> common.Span {
+	return tokens_span(ast, index, index, index)
+}
+
+node_span :: proc(ast: Ast, index: Node_Index) -> common.Span {
+	return tokens_span(
+		ast,
+		first_token(ast, index),
+		last_token(ast, index),
+		ast.nodes[index].main_token,
+	)
+}
+
+tokens_span :: proc(ast: Ast, first, last, main: Token_Index) -> common.Span {
+	first, last := first, last
+	switch {
+	case tokens_on_same_line(ast, first, last):
+	case tokens_on_same_line(ast, first, main):
+		last = main
+	case tokens_on_same_line(ast, main, last):
+		first = main
+	case:
+		first, last = main, main
+	}
+	return {
+		start = ast.tokens[first].start,
+		end = token_end(ast, last),
+		main = ast.tokens[main].start,
+	}
+}
+
+error_span :: proc(ast: Ast, error: Error) -> common.Span {
+	if error.after_previous {
+		end := token_end(ast, error.previous)
+		return {start = end, end = end, main = end}
+	}
+	return token_span(ast, error.token)
+}
+
+token_end :: proc(ast: Ast, index: Token_Index) -> u32 {
+	return ast.tokens[index].start + u32(len(token_text(ast, index)))
+}
+
+tokens_on_same_line :: proc(ast: Ast, a, b: Token_Index) -> bool {
+	return !strings.contains_rune(ast.source[ast.tokens[a].start:ast.tokens[b].start], '\n')
+}
+
+first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
+	index := index
+	for {
+		node := ast.nodes[index]
+		switch node.tag {
+		case .Root:
+			return 0
+		case .Block, .Number_Literal, .String_Literal, .Grouped, .Negate:
+			return node.main_token
+		case .Add, .Sub, .Mul, .Div:
+			index = node.data.node_and_node.lhs
+		}
+	}
+}
+
+last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
+	index := index
+	for {
+		node := ast.nodes[index]
+		switch node.tag {
+		case .Root:
+			return Token_Index(len(ast.tokens) - 1)
+		case .Block:
+			// the '}' isn't stored, but only ';' can be between it and the last statement
+			token := node.main_token
+			if statements := block_statements(ast, index); len(statements) > 0 {
+				token = last_token(ast, statements[len(statements) - 1])
+			}
+			token += 1
+			for ast.tokens[token].tag == .Semi do token += 1
+			return token
+		case .Number_Literal, .String_Literal:
+			return node.main_token
+		case .Grouped:
+			return node.data.token_and_node.token
+		case .Negate:
+			index = node.data.node
+		case .Add, .Sub, .Mul, .Div:
+			index = node.data.node_and_node.rhs
+		}
+	}
 }
 
 // Index into Ast.tokens.
@@ -127,10 +221,14 @@ Node_Range :: struct {
 }
 
 Error :: struct {
-	tag:      Error_Tag,
-	token:    Token_Index,
+	tag:            Error_Tag,
+	token:          Token_Index,
 	// Only used for `Expected_Token`.
-	expected: Token_Tag,
+	expected:       Token_Tag,
+	// Set when `token` is on a later line than the unfinished code before it.
+	// The error is then reported at the end of `previous`.
+	after_previous: bool,
+	previous:       Token_Index,
 }
 
 Error_Tag :: enum u8 {

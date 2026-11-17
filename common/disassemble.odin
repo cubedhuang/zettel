@@ -1,4 +1,4 @@
-package bytecode
+package common
 
 import "core:fmt"
 import "core:io"

@@ -16,6 +16,7 @@ Token_Tag :: enum u8 {
 	Star,
 	Slash,
 	Semi,
+	Newline,
 	Colon,
 	Comma,
 	Paren_Open,
@@ -45,6 +46,7 @@ token_lexemes := #partial [Token_Tag]string {
 	.Star                = "*",
 	.Slash               = "/",
 	.Semi                = ";",
+	.Newline             = "\n",
 	.Colon               = ":",
 	.Comma               = ",",
 	.Paren_Open          = "(",
@@ -73,6 +75,7 @@ token_names := [Token_Tag]string {
 	.Star                = "'*'",
 	.Slash               = "'/'",
 	.Semi                = "';'",
+	.Newline             = "a newline",
 	.Colon               = "':'",
 	.Comma               = "','",
 	.Paren_Open          = "'('",
@@ -132,8 +135,7 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	token.start = u32(t.offset)
 
 	if t.offset >= len(t.source) {
-		token.tag = .Semi if t.insert_semicolon else .EOF
-		t.insert_semicolon = false
+		token.tag = .EOF
 		return
 	}
 
@@ -166,7 +168,7 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	case '}':
 		token.tag = .Brace_Close
 	case '\n':
-		token.tag = .Semi
+		token.tag = .Newline
 
 	// TODO: floating point and whatnot. for now we just have integers
 	case '0' ..= '9':

@@ -46,16 +46,3 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_byte(w, ')')
 	}
 }
-
-source_location :: proc(source: string, offset: u32) -> (line, column: int) {
-	line, column = 1, 1
-	for c in transmute([]u8)source[:offset] {
-		if c == '\n' {
-			line += 1
-			column = 1
-		} else {
-			column += 1
-		}
-	}
-	return
-}

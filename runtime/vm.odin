@@ -1,6 +1,6 @@
 package zettel_runtime
 
-import "../bytecode"
+import "../common"
 import "core:io"
 import "core:strings"
 
@@ -22,48 +22,76 @@ vm_destroy :: proc(vm: ^Vm) {
 	}
 }
 
-run :: proc(vm: ^Vm, program: Program) {
+Runtime_Error :: struct {
+	message: string,
+	span:    common.Span,
+}
+
+run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 	chunk := program.main
 	ip := 0
 
 	for {
-		op := bytecode.Op(chunk.code[ip])
+		start := ip
+		op := common.Op(chunk.code[ip])
 		ip += 1
 
 		switch op {
 		case .Constant:
-			index := bytecode.read_u16(chunk.code, ip)
+			index := common.read_u16(chunk.code, ip)
 			ip += 2
 			vm_push(vm, chunk.constants[index])
 		case .Negate:
-			vm_push(vm, -vm_pop(vm).(f64))
+			operand, is_number := as_number(vm_pop(vm))
+			if !is_number {
+				return runtime_error(vm, chunk, start, "operand must be a number")
+			}
+			vm_push(vm, -operand)
 		case .Add:
 			rhs, lhs := vm_pop(vm), vm_pop(vm)
 			switch lhs in lhs {
 			case ^Obj:
-				rhs, ok := as_obj(rhs)
-				if !ok {
-					// TODO: improve errors
-					panic("string can only be added with string")
+				rhs, is_obj := as_obj(rhs)
+				if !is_obj {
+					return runtime_error(
+						vm,
+						chunk,
+						start,
+						"operands must be two numbers or two strings",
+					)
 				}
 				a, b := (^Obj_String)(lhs), (^Obj_String)(rhs)
 				result := strings.concatenate({a.text, b.text})
 				vm_push(vm, intern_take(vm, result))
 			case f64:
-				rhs, ok := as_number(rhs)
-				if !ok {
-					panic("number can only be added with number")
+				rhs, is_number := as_number(rhs)
+				if !is_number {
+					return runtime_error(
+						vm,
+						chunk,
+						start,
+						"operands must be two numbers or two strings",
+					)
 				}
 				vm_push(vm, lhs + rhs)
 			}
 		case .Sub:
-			rhs, lhs := vm_pop(vm).(f64), vm_pop(vm).(f64)
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
 			vm_push(vm, lhs - rhs)
 		case .Mul:
-			rhs, lhs := vm_pop(vm).(f64), vm_pop(vm).(f64)
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
 			vm_push(vm, lhs * rhs)
 		case .Div:
-			rhs, lhs := vm_pop(vm).(f64), vm_pop(vm).(f64)
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
 			vm_push(vm, lhs / rhs)
 		case .Pop:
 			vm_pop(vm)
@@ -71,9 +99,21 @@ run :: proc(vm: ^Vm, program: Program) {
 			write_value(vm.out, vm_pop(vm))
 			io.write_byte(vm.out, '\n')
 		case .Return:
-			return
+			return {}, true
 		}
 	}
+}
+
+runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runtime_Error, bool) {
+	clear(&vm.stack)
+	return {message = message, span = chunk.spans[ip]}, false
+}
+
+pop_numbers :: proc(vm: ^Vm) -> (lhs, rhs: f64, ok: bool) {
+	rhs_value, lhs_value := vm_pop(vm), vm_pop(vm)
+	lhs = as_number(lhs_value) or_return
+	rhs = as_number(rhs_value) or_return
+	return lhs, rhs, true
 }
 
 vm_push :: proc(vm: ^Vm, value: Value) {

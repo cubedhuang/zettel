@@ -1,6 +1,6 @@
 package zettel
 
-import "bytecode"
+import "common"
 import "compiler"
 import "core:bufio"
 import "core:fmt"
@@ -9,7 +9,7 @@ import "runtime"
 
 REPL_PATH :: "<repl>"
 
-repl :: proc() {
+repl :: proc(r: Reporter) {
 	vm := runtime.Vm {
 		out = os.to_writer(os.stdout),
 	}
@@ -27,23 +27,25 @@ repl :: proc() {
 		}
 
 		line := bufio.scanner_text(&scanner)
-		repl_evaluate(&vm, line)
+		repl_evaluate(r, &vm, line)
 	}
 }
 
-repl_evaluate :: proc(vm: ^runtime.Vm, source: string) {
-	ast := compiler.parse(source)
+repl_evaluate :: proc(r: Reporter, vm: ^runtime.Vm, text: string) {
+	source := common.source_make(REPL_PATH, text)
+	defer common.source_destroy(&source)
+
+	ast := compiler.parse(source.text)
 	defer compiler.ast_destroy(&ast)
 
 	if len(ast.errors) > 0 {
-		report_errors(REPL_PATH, ast)
+		report_errors(r, &source, ast)
 		return
 	}
 
-	module, ok := compile(REPL_PATH, ast)
+	module, ok := compile(r, &source, ast)
 	if !ok do return
-	defer bytecode.module_destroy(&module)
+	defer common.module_destroy(&module)
 
-	execute(vm, module)
-	return
+	execute(r, &source, vm, module)
 }

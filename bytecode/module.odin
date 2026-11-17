@@ -5,17 +5,18 @@ Module :: struct {
 }
 
 Chunk :: struct {
-	code:      []u8,
-	constants: []Constant,
+	code:         []u8,
+	constants:    []Constant,
+	string_bytes: []u8,
 }
 
 Constant :: union {
 	f64,
-	// TODO: add a string_bytes field to chunk so that this actually works
 	Constant_String,
 }
 
 Constant_String :: struct {
+	// Index into `string_bytes`
 	start: u32,
 	len:   u32,
 }
@@ -48,6 +49,7 @@ module_destroy :: proc(module: ^Module) {
 chunk_destroy :: proc(chunk: ^Chunk) {
 	delete(chunk.code)
 	delete(chunk.constants)
+	delete(chunk.string_bytes)
 }
 
 read_u16 :: proc(code: []u8, offset: int) -> u16 {

@@ -77,6 +77,8 @@ Node_Tag :: enum u8 {
 
 	// The `data` field is unused.
 	Number_Literal,
+	// The `data` field is unused.
+	String_Literal,
 	// `(node)`.
 	//
 	// The `data` field is `token_and_node`. The token is the `)` and the node is the sub-expression.

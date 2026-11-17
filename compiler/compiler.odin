@@ -11,6 +11,8 @@ Compiler :: struct {
 	code:               [dynamic]u8,
 	constants:          [dynamic]bytecode.Constant,
 	constant_locations: map[bytecode.Constant]int,
+	string_bytes:       [dynamic]u8,
+	string_locations:   map[string]bytecode.Constant_String,
 	error:              Compile_Error,
 }
 
@@ -26,6 +28,7 @@ compile :: proc(ast: Ast) -> (module: bytecode.Module, error: Compile_Error) {
 		ast = ast,
 	}
 	defer delete(c.constant_locations)
+	defer delete(c.string_locations)
 
 	compile_root(&c)
 
@@ -34,7 +37,12 @@ compile :: proc(ast: Ast) -> (module: bytecode.Module, error: Compile_Error) {
 		delete(c.constants)
 		return {}, c.error
 	}
-	return {main = {code = c.code[:], constants = c.constants[:]}}, .None
+	module.main = {
+		code         = c.code[:],
+		constants    = c.constants[:],
+		string_bytes = c.string_bytes[:],
+	}
+	return module, .None
 }
 
 compile_root :: proc(c: ^Compiler) {
@@ -63,6 +71,10 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Number_Literal:
 		// TODO: better numbers
 		value, _ := strconv.parse_f64(token_text(c.ast, node.main_token))
+		emit_constant(c, value)
+	case .String_Literal:
+		// TODO: better strings
+		value := add_string(c, token_text(c.ast, node.main_token))
 		emit_constant(c, value)
 	case .Grouped:
 		compile_expression(c, node.data.token_and_node.node)
@@ -104,4 +116,23 @@ emit_constant :: proc(c: ^Compiler, constant: bytecode.Constant) {
 	}
 
 	append(&c.code, u8(bytecode.Op.Constant), u8(index), u8(index >> 8))
+}
+
+add_string :: proc(c: ^Compiler, source: string) -> bytecode.Constant_String {
+	str := source[1:len(source) - 1]
+	if value, ok := c.string_locations[str]; ok {
+		return value
+	}
+
+	bytes := transmute([]u8)str
+	start := len(c.string_bytes)
+	append(&c.string_bytes, ..bytes)
+
+	value := bytecode.Constant_String {
+		start = u32(start),
+		len   = u32(len(str)),
+	}
+	c.string_locations[str] = value
+
+	return value
 }

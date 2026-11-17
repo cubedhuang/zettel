@@ -29,7 +29,9 @@ load_chunk :: proc(vm: ^Vm, chunk: bytecode.Chunk) -> Chunk {
 		case f64:
 			constants[index] = c
 		case bytecode.Constant_String:
-			unreachable()
+			s := chunk.string_bytes[c.start:][:c.len]
+			value := intern_clone(vm, string(s))
+			constants[index] = value
 		}
 	}
 	return {code = slice.clone(chunk.code), constants = constants}

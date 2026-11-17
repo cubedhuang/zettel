@@ -85,7 +85,7 @@ report_errors :: proc(path: string, ast: compiler.Ast) {
 			fmt.eprintfln(
 				"expected %v, got %v",
 				compiler.token_names[error.expected],
-				compiler.token_names[error.expected],
+				compiler.token_names[ast.tokens[error.token].tag],
 			)
 		}
 	}

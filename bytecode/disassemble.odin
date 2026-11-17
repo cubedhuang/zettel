@@ -12,7 +12,14 @@ disassemble :: proc(w: io.Writer, chunk: Chunk) {
 		#partial switch op {
 		case .Constant:
 			index := read_u16(chunk.code, offset + 1)
-			fmt.wprintf(w, " [%v] %v", index, chunk.constants[index], flush = false)
+			fmt.wprintf(w, " [%v] ", index, flush = false)
+			constant := chunk.constants[index]
+			switch c in constant {
+			case f64:
+				fmt.wprint(w, c, flush = false)
+			case Constant_String:
+				fmt.wprintf(w, "\"%s\"", chunk.string_bytes[c.start:][:c.len], flush = false)
+			}
 		}
 
 		io.write_byte(w, '\n')

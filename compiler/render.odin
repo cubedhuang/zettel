@@ -26,6 +26,8 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_byte(w, ')')
 	case .Number_Literal:
 		io.write_string(w, token_text(ast, node.main_token))
+	case .String_Literal:
+		io.write_string(w, token_text(ast, node.main_token))
 	case .Grouped:
 		io.write_string(w, "(group ")
 		render_node(w, ast, node.data.token_and_node.node, indent)

@@ -33,6 +33,7 @@ Token_Tag :: enum u8 {
 	Keyword_Constructor,
 	// Dynamic content
 	Number,
+	String,
 	Identifier,
 }
 
@@ -89,6 +90,7 @@ token_names := [Token_Tag]string {
 	.Keyword_Constructor = "'constructor'",
 	// Dynamic content
 	.Number              = "a number",
+	.String              = "a string",
 	.Identifier          = "an identifier",
 }
 
@@ -177,6 +179,17 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 			t.offset += 1
 		}
 
+	case '"':
+		token.tag = .String
+		for peek(t) != 0 && peek(t) != '"' {
+			t.offset += 1
+		}
+		if peek(t) == 0 {
+			token.tag = .Invalid
+		} else {
+			t.offset += 1
+		}
+
 	case 'a' ..= 'z', 'A' ..= 'Z', '_':
 		token.tag = .Identifier
 
@@ -213,7 +226,7 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	#partial switch token.tag {
 	case .Invalid:
 		break
-	case .Paren_Close, .Brace_Close, .Number, .Identifier:
+	case .Paren_Close, .Brace_Close, .Number, .String, .Identifier:
 		t.insert_semicolon = true
 	case:
 		t.insert_semicolon = false

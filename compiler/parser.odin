@@ -147,11 +147,14 @@ parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 }
 
 // Primary <- NUMBER
+//          / STRING
 //          / PAREN_OPEN Expr PAREN_CLOSE
 parse_primary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	#partial switch peek_tag(p) {
 	case .Number:
 		return add_node(p, {tag = .Number_Literal, main_token = advance(p)}), true
+	case .String:
+		return add_node(p, {tag = .String_Literal, main_token = advance(p)}), true
 	case .Paren_Open:
 		open := advance(p)
 		p.depth += 1

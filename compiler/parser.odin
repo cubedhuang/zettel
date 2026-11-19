@@ -247,16 +247,34 @@ parse_expression :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, 
 	return node, true
 }
 
+// PRECEDENCE:
+//
+// Equality        == !=
+// Comparison      < <= > >=
+// Addition        + -
+// Multiplication  * /
 binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 	#partial switch tag {
+	case .Eq_Eq:
+		return .Equal, 1
+	case .Bang_Eq:
+		return .Not_Equal, 1
+	case .Lt:
+		return .Less, 2
+	case .Lt_Eq:
+		return .Less_Equal, 2
+	case .Gt:
+		return .Greater, 2
+	case .Gt_Eq:
+		return .Greater_Equal, 2
 	case .Plus:
-		return .Add, 1
+		return .Add, 3
 	case .Minus:
-		return .Sub, 1
+		return .Sub, 3
 	case .Star:
-		return .Mul, 2
+		return .Mul, 4
 	case .Slash:
-		return .Div, 2
+		return .Div, 4
 	}
 	return .Root, 0
 }

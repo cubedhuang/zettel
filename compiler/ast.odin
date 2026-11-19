@@ -139,7 +139,18 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Negate,
 		     .Not:
 			return node.main_token
-		case .Assign, .Decl, .Add, .Sub, .Mul, .Div:
+		case .Assign,
+		     .Decl,
+		     .Add,
+		     .Sub,
+		     .Mul,
+		     .Div,
+		     .Equal,
+		     .Not_Equal,
+		     .Less,
+		     .Less_Equal,
+		     .Greater,
+		     .Greater_Equal:
 			index = node.data.node_and_node.lhs
 		case .Assign_Multi, .Decl_Multi:
 			index = assign_targets(ast, index)[0]
@@ -174,7 +185,18 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			return node.data.token_and_node.token
 		case .Negate, .Not:
 			index = node.data.node
-		case .Assign, .Decl, .Add, .Sub, .Mul, .Div:
+		case .Assign,
+		     .Decl,
+		     .Add,
+		     .Sub,
+		     .Mul,
+		     .Div,
+		     .Equal,
+		     .Not_Equal,
+		     .Less,
+		     .Less_Equal,
+		     .Greater,
+		     .Greater_Equal:
 			index = node.data.node_and_node.rhs
 		case .Assign_Multi, .Decl_Multi:
 			values := assign_values(ast, index)
@@ -271,6 +293,18 @@ Node_Tag :: enum u8 {
 	Mul,
 	// `lhs / rhs`
 	Div,
+	// `lhs == rhs`
+	Equal,
+	// `lhs != rhs`
+	Not_Equal,
+	// `lhs < rhs`
+	Less,
+	// `lhs <= rhs`
+	Less_Equal,
+	// `lhs > rhs`
+	Greater,
+	// `lhs >= rhs`
+	Greater_Equal,
 }
 
 Node_Data :: struct #raw_union {

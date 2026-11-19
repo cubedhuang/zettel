@@ -52,7 +52,16 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_string(w, "(! ")
 		render_node(w, ast, node.data.node, indent)
 		io.write_byte(w, ')')
-	case .Add, .Sub, .Mul, .Div:
+	case .Add,
+	     .Sub,
+	     .Mul,
+	     .Div,
+	     .Equal,
+	     .Not_Equal,
+	     .Less,
+	     .Less_Equal,
+	     .Greater,
+	     .Greater_Equal:
 		io.write_byte(w, '(')
 		io.write_string(w, token_text(ast, node.main_token))
 		io.write_byte(w, ' ')

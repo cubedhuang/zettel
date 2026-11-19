@@ -40,6 +40,13 @@ Op :: enum u8 {
 	Sub,
 	Mul,
 	Div,
+	Equal,
+	Not_Equal,
+	Less,
+	Less_Equal,
+	Greater,
+	Greater_Equal,
+	//
 	Pop,
 	Return,
 	// TODO: get rid of this at some point

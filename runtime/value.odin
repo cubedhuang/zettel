@@ -154,3 +154,12 @@ to_bool :: #force_inline proc "contextless" (v: Value) -> bool {
 	}
 	return v == TRUE
 }
+
+// For numbers, `nan != nan` and `0 == -0`.
+// Strings are interned! (/^▽^)/
+values_equal :: #force_inline proc "contextless" (a, b: Value) -> bool {
+	if is_number(a) && is_number(b) {
+		return to_number(a) == to_number(b)
+	}
+	return a == b
+}

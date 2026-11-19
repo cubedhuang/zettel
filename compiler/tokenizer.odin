@@ -11,7 +11,13 @@ Token_Tag :: enum u8 {
 	EOF,
 	// Symbols
 	Eq,
+	Eq_Eq,
 	Bang,
+	Bang_Eq,
+	Lt,
+	Lt_Eq,
+	Gt,
+	Gt_Eq,
 	Plus,
 	Minus,
 	Star,
@@ -45,7 +51,13 @@ Token_Tag :: enum u8 {
 token_lexemes := #partial [Token_Tag]string {
 	// Symbols
 	.Eq                  = "=",
+	.Eq_Eq               = "==",
 	.Bang                = "!",
+	.Bang_Eq             = "!=",
+	.Lt                  = "<",
+	.Lt_Eq               = "<=",
+	.Gt                  = ">",
+	.Gt_Eq               = ">=",
 	.Plus                = "+",
 	.Minus               = "-",
 	.Star                = "*",
@@ -78,7 +90,13 @@ token_names := [Token_Tag]string {
 	.EOF                 = "end of input",
 	// Symbols
 	.Eq                  = "'='",
+	.Eq_Eq               = "'=='",
 	.Bang                = "'!'",
+	.Bang_Eq             = "'!='",
+	.Lt                  = "'<'",
+	.Lt_Eq               = "'<='",
+	.Gt                  = "'>'",
+	.Gt_Eq               = "'>='",
 	.Plus                = "'+'",
 	.Minus               = "'-'",
 	.Star                = "'*'",
@@ -156,9 +174,13 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 
 	switch c {
 	case '=':
-		token.tag = .Eq
+		token.tag = .Eq_Eq if match(t, '=') else .Eq
 	case '!':
-		token.tag = .Bang
+		token.tag = .Bang_Eq if match(t, '=') else .Bang
+	case '<':
+		token.tag = .Lt_Eq if match(t, '=') else .Lt
+	case '>':
+		token.tag = .Gt_Eq if match(t, '=') else .Gt
 	case '+':
 		token.tag = .Plus
 	case '-':
@@ -266,6 +288,13 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 
 peek :: proc(t: ^Tokenizer) -> u8 {
 	return t.source[t.offset] if t.offset < len(t.source) else 0
+}
+
+// Consumes the next character if it's `c`.
+match :: proc(t: ^Tokenizer, c: u8) -> bool {
+	if peek(t) != c do return false
+	t.offset += 1
+	return true
 }
 
 is_alphanumeric :: proc(c: u8) -> bool {

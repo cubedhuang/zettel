@@ -89,6 +89,36 @@ run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 				return runtime_error(vm, chunk, start, "operands must be numbers")
 			}
 			vm_push(vm, to_value(lhs / rhs))
+		case .Equal:
+			rhs, lhs := vm_pop(vm), vm_pop(vm)
+			vm_push(vm, to_value(values_equal(lhs, rhs)))
+		case .Not_Equal:
+			rhs, lhs := vm_pop(vm), vm_pop(vm)
+			vm_push(vm, to_value(!values_equal(lhs, rhs)))
+		case .Less:
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
+			vm_push(vm, to_value(lhs < rhs))
+		case .Less_Equal:
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
+			vm_push(vm, to_value(lhs <= rhs))
+		case .Greater:
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
+			vm_push(vm, to_value(lhs > rhs))
+		case .Greater_Equal:
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
+			vm_push(vm, to_value(lhs >= rhs))
 		case .Pop:
 			vm_pop(vm)
 		case .Print:

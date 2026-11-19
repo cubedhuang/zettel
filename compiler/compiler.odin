@@ -104,7 +104,7 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Not:
 		compile_expression(c, node.data.node)
 		emit(c, .Not, span)
-	case .Add, .Sub, .Mul, .Div:
+	case .Add, .Sub, .Mul, .Div, .Equal, .Not_Equal, .Less, .Less_Equal, .Greater, .Greater_Equal:
 		compile_expression(c, node.data.node_and_node.lhs)
 		compile_expression(c, node.data.node_and_node.rhs)
 		#partial switch node.tag {
@@ -116,6 +116,18 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 			emit(c, .Mul, span)
 		case .Div:
 			emit(c, .Div, span)
+		case .Equal:
+			emit(c, .Equal, span)
+		case .Not_Equal:
+			emit(c, .Not_Equal, span)
+		case .Less:
+			emit(c, .Less, span)
+		case .Less_Equal:
+			emit(c, .Less_Equal, span)
+		case .Greater:
+			emit(c, .Greater, span)
+		case .Greater_Equal:
+			emit(c, .Greater_Equal, span)
 		}
 	case:
 		unreachable()

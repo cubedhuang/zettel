@@ -29,8 +29,12 @@ Constant_String :: struct {
 
 Op :: enum u8 {
 	Constant,
+	Nil,
+	True,
+	False,
 	// Unary
 	Negate,
+	Not,
 	// Binary
 	Add,
 	Sub,

@@ -128,7 +128,16 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		switch node.tag {
 		case .Root:
 			return 0
-		case .Block, .Number_Literal, .String_Literal, .Identifier, .Grouped, .Negate:
+		case .Block,
+		     .Number_Literal,
+		     .String_Literal,
+		     .Nil_Literal,
+		     .True_Literal,
+		     .False_Literal,
+		     .Identifier,
+		     .Grouped,
+		     .Negate,
+		     .Not:
 			return node.main_token
 		case .Assign, .Decl, .Add, .Sub, .Mul, .Div:
 			index = node.data.node_and_node.lhs
@@ -154,11 +163,16 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			token += 1
 			for ast.tokens[token].tag == .Semi do token += 1
 			return token
-		case .Number_Literal, .String_Literal, .Identifier:
+		case .Number_Literal,
+		     .String_Literal,
+		     .Nil_Literal,
+		     .True_Literal,
+		     .False_Literal,
+		     .Identifier:
 			return node.main_token
 		case .Grouped:
 			return node.data.token_and_node.token
-		case .Negate:
+		case .Negate, .Not:
 			index = node.data.node
 		case .Assign, .Decl, .Add, .Sub, .Mul, .Div:
 			index = node.data.node_and_node.rhs
@@ -223,6 +237,12 @@ Node_Tag :: enum u8 {
 	Number_Literal,
 	// The `data` field is unused.
 	String_Literal,
+	// `nil`. The `data` field is unused.
+	Nil_Literal,
+	// `true`. The `data` field is unused.
+	True_Literal,
+	// `false`. The `data` field is unused.
+	False_Literal,
 	// The `data` field is unused.
 	Identifier,
 	// `(node)`.
@@ -237,6 +257,8 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `-`.
 	Negate,
+	// `!node`. Same layout as `Negate`.
+	Not,
 	// `lhs + rhs`.
 	//
 	// For all binary operations, the `data` field is `node_and_node` with both operands.

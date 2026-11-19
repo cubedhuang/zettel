@@ -41,58 +41,54 @@ run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 			index := common.read_u16(chunk.code, ip)
 			ip += 2
 			vm_push(vm, chunk.constants[index])
+		case .Nil:
+			vm_push(vm, NIL)
+		case .True:
+			vm_push(vm, TRUE)
+		case .False:
+			vm_push(vm, FALSE)
 		case .Negate:
 			operand, is_number := as_number(vm_pop(vm))
 			if !is_number {
 				return runtime_error(vm, chunk, start, "operand must be a number")
 			}
-			vm_push(vm, -operand)
+			vm_push(vm, to_value(-operand))
+		case .Not:
+			operand := vm_pop(vm)
+			vm_push(vm, to_value(operand == NIL || operand == FALSE))
 		case .Add:
 			rhs, lhs := vm_pop(vm), vm_pop(vm)
-			switch lhs in lhs {
-			case ^Obj:
-				rhs, is_obj := as_obj(rhs)
-				if !is_obj {
-					return runtime_error(
-						vm,
-						chunk,
-						start,
-						"operands must be two numbers or two strings",
-					)
-				}
-				a, b := (^Obj_String)(lhs), (^Obj_String)(rhs)
+			if a, b, ok := as_numbers(lhs, rhs); ok {
+				vm_push(vm, to_value(a + b))
+			} else if a, b, ok := as_strings(lhs, rhs); ok {
 				result := strings.concatenate({a.text, b.text})
-				vm_push(vm, intern_take(vm, result))
-			case f64:
-				rhs, is_number := as_number(rhs)
-				if !is_number {
-					return runtime_error(
-						vm,
-						chunk,
-						start,
-						"operands must be two numbers or two strings",
-					)
-				}
-				vm_push(vm, lhs + rhs)
+				vm_push(vm, to_value(intern_take(vm, result)))
+			} else {
+				return runtime_error(
+					vm,
+					chunk,
+					start,
+					"operands must be two numbers or two strings",
+				)
 			}
 		case .Sub:
 			lhs, rhs, ok := pop_numbers(vm)
 			if !ok {
 				return runtime_error(vm, chunk, start, "operands must be numbers")
 			}
-			vm_push(vm, lhs - rhs)
+			vm_push(vm, to_value(lhs - rhs))
 		case .Mul:
 			lhs, rhs, ok := pop_numbers(vm)
 			if !ok {
 				return runtime_error(vm, chunk, start, "operands must be numbers")
 			}
-			vm_push(vm, lhs * rhs)
+			vm_push(vm, to_value(lhs * rhs))
 		case .Div:
 			lhs, rhs, ok := pop_numbers(vm)
 			if !ok {
 				return runtime_error(vm, chunk, start, "operands must be numbers")
 			}
-			vm_push(vm, lhs / rhs)
+			vm_push(vm, to_value(lhs / rhs))
 		case .Pop:
 			vm_pop(vm)
 		case .Print:
@@ -111,9 +107,22 @@ runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runti
 
 pop_numbers :: proc(vm: ^Vm) -> (lhs, rhs: f64, ok: bool) {
 	rhs_value, lhs_value := vm_pop(vm), vm_pop(vm)
+	return as_numbers(lhs_value, rhs_value)
+}
+
+as_numbers :: proc(lhs_value, rhs_value: Value) -> (lhs, rhs: f64, ok: bool) {
 	lhs = as_number(lhs_value) or_return
 	rhs = as_number(rhs_value) or_return
 	return lhs, rhs, true
+}
+
+as_strings :: proc(lhs_value, rhs_value: Value) -> (lhs, rhs: ^Obj_String, ok: bool) {
+	a := as_obj(lhs_value) or_return
+	b := as_obj(rhs_value) or_return
+	if a.tag != .String || b.tag != .String {
+		return nil, nil, false
+	}
+	return (^Obj_String)(a), (^Obj_String)(b), true
 }
 
 vm_push :: proc(vm: ^Vm, value: Value) {

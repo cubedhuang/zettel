@@ -36,6 +36,8 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_string(w, token_text(ast, node.main_token))
 	case .String_Literal:
 		io.write_string(w, token_text(ast, node.main_token))
+	case .Nil_Literal, .True_Literal, .False_Literal:
+		io.write_string(w, token_text(ast, node.main_token))
 	case .Identifier:
 		io.write_string(w, token_text(ast, node.main_token))
 	case .Grouped:
@@ -44,6 +46,10 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_byte(w, ')')
 	case .Negate:
 		io.write_string(w, "(- ")
+		render_node(w, ast, node.data.node, indent)
+		io.write_byte(w, ')')
+	case .Not:
+		io.write_string(w, "(! ")
 		render_node(w, ast, node.data.node, indent)
 		io.write_byte(w, ')')
 	case .Add, .Sub, .Mul, .Div:

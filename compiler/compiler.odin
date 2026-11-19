@@ -88,6 +88,12 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		// TODO: better strings
 		value := add_string(c, token_text(c.ast, node.main_token))
 		emit_constant(c, value, index)
+	case .Nil_Literal:
+		emit(c, .Nil, span)
+	case .True_Literal:
+		emit(c, .True, span)
+	case .False_Literal:
+		emit(c, .False, span)
 	case .Identifier: // TODO: implement this
 
 	case .Grouped:
@@ -95,6 +101,9 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Negate:
 		compile_expression(c, node.data.node)
 		emit(c, .Negate, span)
+	case .Not:
+		compile_expression(c, node.data.node)
+		emit(c, .Not, span)
 	case .Add, .Sub, .Mul, .Div:
 		compile_expression(c, node.data.node_and_node.lhs)
 		compile_expression(c, node.data.node_and_node.rhs)

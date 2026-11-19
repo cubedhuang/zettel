@@ -264,16 +264,25 @@ binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 // Unary <- UnaryOp Unary
 //        / Primary
 parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
-	if peek_tag(p) == .Minus {
-		operator := advance(p)
-		operand := parse_unary(p) or_return
-		return add_node(p, {tag = .Negate, main_token = operator, data = {node = operand}}), true
+	tag: Node_Tag
+	#partial switch peek_tag(p) {
+	case .Minus:
+		tag = .Negate
+	case .Bang:
+		tag = .Not
+	case:
+		return parse_primary(p)
 	}
-	return parse_primary(p)
+	operator := advance(p)
+	operand := parse_unary(p) or_return
+	return add_node(p, {tag = tag, main_token = operator, data = {node = operand}}), true
 }
 
 // Primary <- NUMBER
 //          / STRING
+//          / KEYWORD_NIL
+//          / KEYWORD_TRUE
+//          / KEYWORD_FALSE
 //          / IDENTIFIER
 //          / PAREN_OPEN Expr PAREN_CLOSE
 parse_primary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
@@ -282,6 +291,12 @@ parse_primary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		return add_node(p, {tag = .Number_Literal, main_token = advance(p)}), true
 	case .String:
 		return add_node(p, {tag = .String_Literal, main_token = advance(p)}), true
+	case .Keyword_Nil:
+		return add_node(p, {tag = .True_Literal, main_token = advance(p)}), true
+	case .Keyword_True:
+		return add_node(p, {tag = .True_Literal, main_token = advance(p)}), true
+	case .Keyword_False:
+		return add_node(p, {tag = .False_Literal, main_token = advance(p)}), true
 	case .Identifier:
 		return add_node(p, {tag = .Identifier, main_token = advance(p)}), true
 	case .Paren_Open:

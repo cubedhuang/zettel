@@ -11,6 +11,7 @@ Token_Tag :: enum u8 {
 	EOF,
 	// Symbols
 	Eq,
+	Bang,
 	Plus,
 	Minus,
 	Star,
@@ -24,6 +25,9 @@ Token_Tag :: enum u8 {
 	Brace_Open,
 	Brace_Close,
 	// Keywords
+	Keyword_Nil,
+	Keyword_True,
+	Keyword_False,
 	Keyword_If,
 	Keyword_Else,
 	Keyword_While,
@@ -41,6 +45,7 @@ Token_Tag :: enum u8 {
 token_lexemes := #partial [Token_Tag]string {
 	// Symbols
 	.Eq                  = "=",
+	.Bang                = "!",
 	.Plus                = "+",
 	.Minus               = "-",
 	.Star                = "*",
@@ -54,6 +59,9 @@ token_lexemes := #partial [Token_Tag]string {
 	.Brace_Open          = "{",
 	.Brace_Close         = "}",
 	// Keywords
+	.Keyword_Nil         = "nil",
+	.Keyword_True        = "true",
+	.Keyword_False       = "false",
 	.Keyword_If          = "if",
 	.Keyword_Else        = "else",
 	.Keyword_While       = "while",
@@ -70,6 +78,7 @@ token_names := [Token_Tag]string {
 	.EOF                 = "end of input",
 	// Symbols
 	.Eq                  = "'='",
+	.Bang                = "'!'",
 	.Plus                = "'+'",
 	.Minus               = "'-'",
 	.Star                = "'*'",
@@ -83,6 +92,9 @@ token_names := [Token_Tag]string {
 	.Brace_Open          = "'{'",
 	.Brace_Close         = "'}'",
 	// Keywords
+	.Keyword_Nil         = "'nil'",
+	.Keyword_True        = "'true'",
+	.Keyword_False       = "'false'",
 	.Keyword_If          = "'if'",
 	.Keyword_Else        = "'else'",
 	.Keyword_While       = "'while'",
@@ -145,6 +157,8 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	switch c {
 	case '=':
 		token.tag = .Eq
+	case '!':
+		token.tag = .Bang
 	case '+':
 		token.tag = .Plus
 	case '-':
@@ -200,6 +214,12 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 		}
 
 		switch t.source[token.start:t.offset] {
+		case "nil":
+			token.tag = .Keyword_Nil
+		case "true":
+			token.tag = .Keyword_True
+		case "false":
+			token.tag = .Keyword_False
 		case "if":
 			token.tag = .Keyword_If
 		case "else":
@@ -228,7 +248,14 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	#partial switch token.tag {
 	case .Invalid:
 		break
-	case .Paren_Close, .Brace_Close, .Number, .String, .Identifier:
+	case .Paren_Close,
+	     .Brace_Close,
+	     .Number,
+	     .String,
+	     .Identifier,
+	     .Keyword_Nil,
+	     .Keyword_True,
+	     .Keyword_False:
 		t.insert_semicolon = true
 	case:
 		t.insert_semicolon = false

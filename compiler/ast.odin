@@ -1,6 +1,7 @@
 package compiler
 
 import "../common"
+import "core:slice"
 import "core:strings"
 
 // Design inspired by Zig's https://codeberg.org/ziglang/zig/src/branch/master/lib/std/zig/Ast.zig
@@ -20,6 +21,10 @@ ast_destroy :: proc(ast: ^Ast) {
 	delete(ast.errors)
 }
 
+extra_data :: proc(ast: Ast, index: Extra_Index, $T: typeid) -> T {
+	return (^T)(&ast.extra[index])^
+}
+
 extra_data_slice :: proc(ast: Ast, range: Node_Range, $T: typeid) -> []T {
 	return transmute([]T)ast.extra[range.start:range.end]
 }
@@ -30,6 +35,28 @@ root_statements :: proc(ast: Ast) -> []Node_Index {
 
 block_statements :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
 	return extra_data_slice(ast, ast.nodes[index].data.extra_range, Node_Index)
+}
+
+assign_targets :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
+	#partial switch ast.nodes[index].tag {
+	case .Assign, .Decl:
+		return slice.from_ptr(&ast.nodes[index].data.node_and_node.lhs, 1)
+	case .Assign_Multi, .Decl_Multi:
+		data := extra_data(ast, ast.nodes[index].data.extra, Multi_Assign)
+		return extra_data_slice(ast, data.lhs, Node_Index)
+	}
+	panic("tag of assign_targets node must be assign or decl")
+}
+
+assign_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
+	#partial switch ast.nodes[index].tag {
+	case .Assign, .Decl:
+		return slice.from_ptr(&ast.nodes[index].data.node_and_node.rhs, 1)
+	case .Assign_Multi, .Decl_Multi:
+		data := extra_data(ast, ast.nodes[index].data.extra, Multi_Assign)
+		return extra_data_slice(ast, data.rhs, Node_Index)
+	}
+	panic("tag of assign_values node must be assign or decl")
 }
 
 token_text :: proc(ast: Ast, index: Token_Index) -> string {
@@ -101,10 +128,12 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		switch node.tag {
 		case .Root:
 			return 0
-		case .Block, .Number_Literal, .String_Literal, .Grouped, .Negate:
+		case .Block, .Number_Literal, .String_Literal, .Identifier, .Grouped, .Negate:
 			return node.main_token
-		case .Add, .Sub, .Mul, .Div:
+		case .Assign, .Decl, .Add, .Sub, .Mul, .Div:
 			index = node.data.node_and_node.lhs
+		case .Assign_Multi, .Decl_Multi:
+			index = assign_targets(ast, index)[0]
 		}
 	}
 }
@@ -125,14 +154,17 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			token += 1
 			for ast.tokens[token].tag == .Semi do token += 1
 			return token
-		case .Number_Literal, .String_Literal:
+		case .Number_Literal, .String_Literal, .Identifier:
 			return node.main_token
 		case .Grouped:
 			return node.data.token_and_node.token
 		case .Negate:
 			index = node.data.node
-		case .Add, .Sub, .Mul, .Div:
+		case .Assign, .Decl, .Add, .Sub, .Mul, .Div:
 			index = node.data.node_and_node.rhs
+		case .Assign_Multi, .Decl_Multi:
+			values := assign_values(ast, index)
+			index = values[len(values) - 1]
 		}
 	}
 }
@@ -166,6 +198,24 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `{`.
 	Block,
+	// `lhs = rhs`.
+	//
+	// The `data` field is `node_and_node`.
+	//
+	// The `main_token` field is the `=`.
+	Assign,
+	// `lhs0, lhs1, ... = rhs0, rhs1, ...`.
+	//
+	// The `data` field is `extra`, pointing at a `Multi_Assign`.
+	//
+	// The `main_token` field is the `=`.
+	Assign_Multi,
+	// `name := value`. Same layout as `Assign`. `lhs` must be an `Identifier` node.
+	//
+	// The `main_token` field is the `=`.
+	Decl,
+	// `a, b := ...`. Same layout as `Assign_Multi`.
+	Decl_Multi,
 
 	// ---------- Expressions ----------
 
@@ -173,6 +223,8 @@ Node_Tag :: enum u8 {
 	Number_Literal,
 	// The `data` field is unused.
 	String_Literal,
+	// The `data` field is unused.
+	Identifier,
 	// `(node)`.
 	//
 	// The `data` field is `token_and_node`. The token is the `)` and the node is the sub-expression.
@@ -202,6 +254,7 @@ Node_Tag :: enum u8 {
 Node_Data :: struct #raw_union {
 	node:           Node_Index,
 	token:          Token_Index,
+	extra:          Extra_Index,
 	node_and_node:  struct {
 		lhs, rhs: Node_Index,
 	},
@@ -217,7 +270,13 @@ Node_Data :: struct #raw_union {
 }
 
 Node_Range :: struct {
+	// `end` is exclusive.
 	start, end: Extra_Index,
+}
+
+Multi_Assign :: struct {
+	lhs: Node_Range,
+	rhs: Node_Range,
 }
 
 Error :: struct {
@@ -234,4 +293,8 @@ Error :: struct {
 Error_Tag :: enum u8 {
 	Expected_Expression,
 	Expected_Token,
+	Expected_Stmt_End,
+	Invalid_Expression_List,
+	Invalid_Declaration_Target,
+	Too_Many_Rhs,
 }

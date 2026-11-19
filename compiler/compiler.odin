@@ -68,6 +68,8 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		for statement in block_statements(c.ast, index) {
 			compile_statement(c, statement)
 		}
+	case .Assign, .Assign_Multi: // TODO: implement this
+	case .Decl, .Decl_Multi: // TODO: implement this
 	case:
 		compile_expression(c, index)
 		emit(c, .Print, node_span(c.ast, index))
@@ -86,6 +88,8 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		// TODO: better strings
 		value := add_string(c, token_text(c.ast, node.main_token))
 		emit_constant(c, value, index)
+	case .Identifier: // TODO: implement this
+
 	case .Grouped:
 		compile_expression(c, node.data.token_and_node.node)
 	case .Negate:

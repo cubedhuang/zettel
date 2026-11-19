@@ -122,6 +122,14 @@ report_errors :: proc(r: Reporter, source: ^common.Source, ast: compiler.Ast) {
 				compiler.token_names[error.expected],
 				found,
 			)
+		case .Expected_Stmt_End:
+			message = fmt.tprintf("expected end of statement, got %v", found)
+		case .Invalid_Expression_List:
+			message = "expected '=' or ':=' after expression list"
+		case .Invalid_Declaration_Target:
+			message = "can only declare identifiers"
+		case .Too_Many_Rhs:
+			message = "more values than targets"
 		}
 		diagnostics[i] = {
 			span    = compiler.error_span(ast, error),

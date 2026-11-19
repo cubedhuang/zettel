@@ -111,29 +111,9 @@ report_errors :: proc(r: Reporter, source: ^common.Source, ast: compiler.Ast) {
 
 	diagnostics := make([]report.Diagnostic, len(ast.errors), context.temp_allocator)
 	for error, i in ast.errors {
-		found := compiler.token_names[ast.tokens[error.token].tag]
-		message: string
-		switch error.tag {
-		case .Expected_Expression:
-			message = fmt.tprintf("expected expression, got %v", found)
-		case .Expected_Token:
-			message = fmt.tprintf(
-				"expected %v, got %v",
-				compiler.token_names[error.expected],
-				found,
-			)
-		case .Expected_Stmt_End:
-			message = fmt.tprintf("expected end of statement, got %v", found)
-		case .Invalid_Expression_List:
-			message = "expected '=' or ':=' after expression list"
-		case .Invalid_Declaration_Target:
-			message = "can only declare identifiers"
-		case .Too_Many_Rhs:
-			message = "more values than targets"
-		}
 		diagnostics[i] = {
 			span    = compiler.error_span(ast, error),
-			message = message,
+			message = compiler.error_message(ast, error),
 		}
 	}
 	report_diagnostics(r, source, diagnostics)
@@ -151,17 +131,18 @@ compile :: proc(
 
 	error: compiler.Compile_Error
 	module, error = compiler.compile(ast)
-	message: string
-	switch error.tag {
-	case .None:
+	if error.tag == .None {
 		return module, true
-	case .Too_Many_Constants:
-		message = fmt.tprintf("more than %v constants", common.MAX_CONSTANTS)
 	}
 	report_diagnostics(
 		r,
 		source,
-		{{span = compiler.node_span(ast, error.node), message = message}},
+		{
+			{
+				span = compiler.node_span(ast, error.node),
+				message = compiler.error_message(error),
+			},
+		},
 	)
 	return
 }

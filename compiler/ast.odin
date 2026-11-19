@@ -1,6 +1,7 @@
 package compiler
 
 import "../common"
+import "core:fmt"
 import "core:slice"
 import "core:strings"
 
@@ -353,4 +354,24 @@ Error_Tag :: enum u8 {
 	Invalid_Expression_List,
 	Invalid_Declaration_Target,
 	Too_Many_Rhs,
+}
+
+// Uses `context.temp_allocator`.
+parse_error_message :: proc(ast: Ast, error: Error) -> string {
+	found := token_names[ast.tokens[error.token].tag]
+	switch error.tag {
+	case .Expected_Expression:
+		return fmt.tprintf("expected expression, got %v", found)
+	case .Expected_Token:
+		return fmt.tprintf("expected %v, got %v", token_names[error.expected], found)
+	case .Expected_Stmt_End:
+		return fmt.tprintf("expected end of statement, got %v", found)
+	case .Invalid_Expression_List:
+		return "expected '=' or ':=' after expression list"
+	case .Invalid_Declaration_Target:
+		return "can only declare identifiers"
+	case .Too_Many_Rhs:
+		return "more values than targets"
+	}
+	unreachable()
 }

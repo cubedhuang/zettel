@@ -2,6 +2,7 @@
 package compiler
 
 import "../common"
+import "core:fmt"
 import "core:strconv"
 
 // `Compiler` contains intermediate compilation data about a single chunk. After compilation,
@@ -25,6 +26,22 @@ Compile_Error :: struct {
 Compile_Error_Tag :: enum u8 {
 	None,
 	Too_Many_Constants,
+}
+
+error_message :: proc {
+	parse_error_message,
+	compile_error_message,
+}
+
+// Uses `context.temp_allocator`.
+compile_error_message :: proc(error: Compile_Error) -> string {
+	switch error.tag {
+	case .None:
+		return ""
+	case .Too_Many_Constants:
+		return fmt.tprintf("more than %v constants", common.MAX_CONSTANTS)
+	}
+	unreachable()
 }
 
 compile :: proc(ast: Ast) -> (module: common.Module, error: Compile_Error) {

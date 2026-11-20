@@ -1,0 +1,5 @@
+blk: {
+    while true {
+        continue blk // error: can't continue 'blk' because it isn't a loop
+    }
+}

@@ -152,6 +152,7 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .If,
 		     .While_Simple,
 		     .While,
+		     .Labeled,
 		     .Break,
 		     .Continue,
 		     .Number_Literal,
@@ -207,8 +208,10 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		case .If, .While:
 			extra := extra_data(ast, node.data.node_and_extra.extra, If_While)
 			index = extra.else_branch if extra.else_branch != 0 else extra.body
+		case .Labeled:
+			index = node.data.node
 		case .Break, .Continue:
-			return node.main_token
+			return node.data.token if node.data.token != 0 else node.main_token
 		case .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -315,9 +318,17 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `while`.
 	While,
-	// `break`. The `data` field is unused.
+	// `label: node`, where `node` is a `Block`, `If_Simple`, `If`, `While_Simple`, or `While`.
+	//
+	// The `data` field is `node`.
+	//
+	// The `main_token` field is the label.
+	Labeled,
+	// `break` or `break label`.
+	//
+	// The `data` field is `token`, the optional label.
 	Break,
-	// `continue`. The `data` field is unused.
+	// `continue` or `continue label`. Same layout as `Break`.
 	Continue,
 
 	// ---------- Expressions ----------
@@ -435,6 +446,7 @@ Error_Tag :: enum u8 {
 	Invalid_Expression_List,
 	Invalid_Declaration_Target,
 	Too_Many_Rhs,
+	Invalid_Label_Target,
 }
 
 // Uses `context.temp_allocator`.
@@ -453,6 +465,8 @@ parse_error_message :: proc(ast: Ast, error: Error) -> string {
 		return "can only declare identifiers"
 	case .Too_Many_Rhs:
 		return "more values than targets"
+	case .Invalid_Label_Target:
+		return fmt.tprintf("can only label blocks, if statements, and while loops, got %v", found)
 	}
 	unreachable()
 }

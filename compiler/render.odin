@@ -48,8 +48,18 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 			render_node(w, ast, else_branch, indent + 1)
 		}
 		io.write_byte(w, ')')
+	case .Labeled:
+		io.write_byte(w, '(')
+		io.write_string(w, token_text(ast, node.main_token))
+		io.write_string(w, ": ")
+		render_node(w, ast, node.data.node, indent)
+		io.write_byte(w, ')')
 	case .Break, .Continue:
 		io.write_string(w, token_text(ast, node.main_token))
+		if node.data.token != 0 {
+			io.write_byte(w, ' ')
+			io.write_string(w, token_text(ast, node.data.token))
+		}
 	case .Number_Literal:
 		io.write_string(w, token_text(ast, node.main_token))
 	case .String_Literal:

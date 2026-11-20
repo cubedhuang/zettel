@@ -1,0 +1,80 @@
+// breaking out of a labeled block skips the rest of it
+block: {
+    echo "start" // expect: "start"
+    if true { break block }
+    echo "skipped"
+}
+
+// locals inside the block are popped, outer ones are untouched
+outer_local := "outer"
+{
+    kept := "kept"
+    found: {
+        a := 1
+        {
+            b := 2
+            if a + b == 3 { break found }
+        }
+        echo "skipped"
+    }
+    echo kept // expect: "kept"
+}
+echo outer_local // expect: "outer"
+
+// breaking out of a labeled if, including from its else and its initializer's scope
+check: if n := 5; n > 10 {
+    echo "skipped"
+} else {
+    if n == 5 { break check }
+    echo "skipped"
+}
+
+// break and continue an outer loop from an inner one
+pairs := 0
+i := 0
+outer: while i < 4 {
+    i = i + 1
+    j := 0
+    while j < 4 {
+        j = j + 1
+        if j == 2 { continue outer }
+        if i == 3 { break outer }
+        pairs = pairs + 1
+    }
+}
+echo pairs // expect: 2
+echo i     // expect: 3
+
+// a labeled while's initializer re-runs after `continue label`
+count := 0
+k := 0
+counting: while step := 1; k < 5 {
+    k = k + step
+    if k == 2 { continue counting }
+    count = count + 1
+}
+echo count // expect: 4
+
+// break label skips the loop's else, and works from inside the else
+done: while false { } else {
+    echo "in else" // expect: "in else"
+    break done
+    echo "skipped"
+}
+skipped_else: while true { break skipped_else } else { echo "skipped" }
+
+// unlabeled break and continue ignore labeled blocks and ifs
+m := 0
+while m < 3 {
+    m = m + 1
+    inner: {
+        if m == 2 { continue }
+        if m == 3 { break }
+    }
+    echo m // expect: 1
+}
+echo m // expect: 3
+
+// labels have their own namespace
+x := 1
+x: { echo x } // expect: 1

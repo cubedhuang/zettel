@@ -82,8 +82,9 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 // Stmt <- Block
 //       / IfStmt
 //       / WhileStmt
-//       / KEYWORD_BREAK SEMI
-//       / KEYWORD_CONTINUE SEMI
+//       / LabeledStmt
+//       / KEYWORD_BREAK IDENTIFIER? SEMI
+//       / KEYWORD_CONTINUE IDENTIFIER? SEMI
 //       / SimpleStmt SEMI
 //
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE
@@ -97,14 +98,39 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		return parse_while(p)
 	case .Keyword_Break, .Keyword_Continue:
 		tag: Node_Tag = .Break if peek_tag(p) == .Keyword_Break else .Continue
-		node = add_node(p, {tag = tag, main_token = advance(p)})
+		keyword := advance(p)
+		label := advance(p) if peek_tag(p) == .Identifier else 0
+		node = add_node(p, {tag = tag, main_token = keyword, data = {token = label}})
 		expect_stmt_end(p) or_return
 		return node, true
+	case .Identifier:
+		if p.tokens[p.i + 1].tag == .Colon && p.tokens[p.i + 2].tag != .Eq {
+			return parse_labeled(p)
+		}
 	}
 
 	node = parse_simple_stmt(p) or_return
 	expect_stmt_end(p) or_return
 	return node, true
+}
+
+// LabeledStmt <- IDENTIFIER COLON (Block / IfStmt / WhileStmt)
+parse_labeled :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	label := expect(p, .Identifier) or_return
+	expect(p, .Colon) or_return
+	statement: Node_Index
+	#partial switch peek_tag(p) {
+	case .Brace_Open:
+		statement = parse_block(p) or_return
+	case .Keyword_If:
+		statement = parse_if(p) or_return
+	case .Keyword_While:
+		statement = parse_while(p) or_return
+	case:
+		add_error(p, {tag = .Invalid_Label_Target})
+		return
+	}
+	return add_node(p, {tag = .Labeled, main_token = label, data = {node = statement}}), true
 }
 
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE

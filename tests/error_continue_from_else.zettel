@@ -1,0 +1,3 @@
+loop: while false { } else {
+    continue loop // error: can't continue 'loop' from its else
+}

@@ -31,18 +31,11 @@ Compiler :: struct {
 	locals:              [dynamic]Local,
 	// Declarations make statics at depth 0 and locals afterwards.
 	depth:               int,
-	// Enclosing loops, innermost last.
-	loops:               [dynamic]Loop,
-	// `break` jumps to patch, innermost loop's last.
-	breaks:              [dynamic]int,
+	// Enclosing loops and labeled statements, innermost last.
+	targets:             [dynamic]Target,
+	// `break` jumps that haven't been patched yet.
+	breaks:              [dynamic]Break,
 	error:               Compile_Error,
-}
-
-Loop :: struct {
-	// Where `continue` jumps.
-	start: int,
-	// Locals deeper than this belong to the loop.
-	depth: int,
 }
 
 Local :: struct {
@@ -56,6 +49,26 @@ Variable :: struct {
 		Local,
 	},
 	slot: int,
+}
+
+// Target for `break` and sometimes `continue`.
+Target :: struct {
+	// Empty for an unlabeled loop.
+	label:   string,
+	is_loop: bool,
+	// Set while compiling a loop's `else`, which unlabeled `break` and `continue` skip past.
+	in_else: bool,
+	// Where `continue` goes.
+	start:   int,
+	// Locals deeper than this belong to the target.
+	depth:   int,
+}
+
+Break :: struct {
+	// The jump's location for `patch_jump`.
+	location: int,
+	// Index into `Compiler.targets`.
+	target:   int,
 }
 
 Compile_Error :: struct {
@@ -80,6 +93,14 @@ Compile_Error_Tag :: enum u8 {
 	Too_Few_Values,
 	// `node` is the `break` or `continue`.
 	Outside_Loop,
+	// `node` is the `break` or `continue`.
+	Unknown_Label,
+	// `node` is the `continue`.
+	Continue_Not_Loop,
+	// `node` is the `continue`.
+	Continue_From_Else,
+	// `node` is the `Labeled`.
+	Label_Shadowed,
 }
 
 error_message :: proc {
@@ -115,7 +136,30 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 	case .Too_Few_Values:
 		return "fewer values than targets"
 	case .Outside_Loop:
-		return fmt.tprintf("'%v' outside of a loop", token_text(ast, ast.nodes[error.node].main_token))
+		return fmt.tprintf(
+			"'%v' outside of a loop",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Unknown_Label:
+		return fmt.tprintf(
+			"no enclosing statement is labeled '%v'",
+			token_text(ast, ast.nodes[error.node].data.token),
+		)
+	case .Continue_Not_Loop:
+		return fmt.tprintf(
+			"can't continue '%v' because it isn't a loop",
+			token_text(ast, ast.nodes[error.node].data.token),
+		)
+	case .Continue_From_Else:
+		return fmt.tprintf(
+			"can't continue '%v' from its else",
+			token_text(ast, ast.nodes[error.node].data.token),
+		)
+	case .Label_Shadowed:
+		return fmt.tprintf(
+			"label '%v' is already used by an enclosing statement",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
 	}
 	unreachable()
 }
@@ -142,7 +186,7 @@ compile :: proc(
 	defer delete(c.string_locations)
 	defer delete(c.static_slots)
 	defer delete(c.locals)
-	defer delete(c.loops)
+	defer delete(c.targets)
 	defer delete(c.breaks)
 
 	append(&c.static_bytes, ..statics.bytes)
@@ -199,6 +243,8 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		compile_if(c, index)
 	case .While_Simple, .While:
 		compile_while(c, index)
+	case .Labeled:
+		compile_labeled(c, index)
 	case .Break, .Continue:
 		compile_break(c, index)
 	case:
@@ -307,16 +353,14 @@ compile_if :: proc(c: ^Compiler, index: Node_Index) {
 	patch_jump(c, to_end, index)
 }
 
-compile_while :: proc(c: ^Compiler, index: Node_Index) {
+compile_while :: proc(c: ^Compiler, index: Node_Index, label := "") {
 	init, condition, body, else_branch := if_while_parts(c.ast, index)
 	span := token_span(c.ast, c.ast.nodes[index].main_token)
-	loop := Loop {
-		start = len(c.code),
-		depth = c.depth,
-	}
-	first_break := len(c.breaks)
+	target := begin_target(
+		c,
+		{label = label, is_loop = true, start = len(c.code), depth = c.depth},
+	)
 
-	append(&c.loops, loop)
 	begin_scope(c)
 	if init != 0 do compile_statement(c, init)
 	compile_expression(c, condition)
@@ -324,37 +368,106 @@ compile_while :: proc(c: ^Compiler, index: Node_Index) {
 	emit(c, .Pop, span)
 	compile_statement(c, body)
 	// Initializer locals are popped each iteration.
-	emit_pops_above(c, loop.depth, span)
-	emit_loop(c, loop.start, span, index)
-	pop(&c.loops)
-	// Breaks inside the `else` belong to an enclosing loop.
-	last_break := len(c.breaks)
+	emit_pops_above(c, c.targets[target].depth, span)
+	emit_loop(c, c.targets[target].start, span, index)
 
 	patch_jump(c, exit, index)
 	emit(c, .Pop, span)
 	// The `else` isn't part of the loop, but the initializer's locals are still in scope.
+	c.targets[target].in_else = true
 	if else_branch != 0 do compile_statement(c, else_branch)
 	end_scope(c, span)
 
-	// `break` pops the loop's locals itself, so it skips past `end_scope`'s pops.
-	for location in c.breaks[first_break:last_break] do patch_jump(c, location, index)
-	remove_range(&c.breaks, first_break, last_break)
+	end_target(c, target, index)
+}
+
+compile_labeled :: proc(c: ^Compiler, index: Node_Index) {
+	label := token_text(c.ast, c.ast.nodes[index].main_token)
+	for target in c.targets {
+		if target.label == label {
+			fail(c, .Label_Shadowed, index)
+			return
+		}
+	}
+
+	statement := c.ast.nodes[index].data.node
+	#partial switch c.ast.nodes[statement].tag {
+	case .While_Simple, .While:
+		compile_while(c, statement, label)
+	case:
+		target := begin_target(c, {label = label, depth = c.depth})
+		compile_statement(c, statement)
+		end_target(c, target, index)
+	}
 }
 
 compile_break :: proc(c: ^Compiler, index: Node_Index) {
-	if len(c.loops) == 0 {
-		fail(c, .Outside_Loop, index)
-		return
-	}
-	loop := c.loops[len(c.loops) - 1]
-	span := node_span(c.ast, index)
+	node := c.ast.nodes[index]
+	is_break := node.tag == .Break
 
-	emit_pops_above(c, loop.depth, span)
-	if c.ast.nodes[index].tag == .Break {
-		append(&c.breaks, emit_jump(c, .Jump, span))
+	found := -1
+	if node.data.token == 0 {
+		#reverse for target, i in c.targets {
+			if target.is_loop && !target.in_else {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			fail(c, .Outside_Loop, index)
+			return
+		}
 	} else {
-		emit_loop(c, loop.start, span, index)
+		label := token_text(c.ast, node.data.token)
+		#reverse for target, i in c.targets {
+			if target.label == label {
+				found = i
+				break
+			}
+		}
+		switch {
+		case found < 0:
+			fail(c, .Unknown_Label, index)
+			return
+		case !is_break && !c.targets[found].is_loop:
+			fail(c, .Continue_Not_Loop, index)
+			return
+		case !is_break && c.targets[found].in_else:
+			fail(c, .Continue_From_Else, index)
+			return
+		}
 	}
+
+	target := c.targets[found]
+	span := node_span(c.ast, index)
+	emit_pops_above(c, target.depth, span)
+	if is_break {
+		append(&c.breaks, Break{emit_jump(c, .Jump, span), found})
+	} else {
+		emit_loop(c, target.start, span, index)
+	}
+}
+
+// Returns the target's index.
+begin_target :: proc(c: ^Compiler, target: Target) -> int {
+	append(&c.targets, target)
+	return len(c.targets) - 1
+}
+
+// Patches the target's breaks to jump here. A `break` pops the target's locals itself, so it skips
+// past any pops emitted when the target's scopes ended.
+end_target :: proc(c: ^Compiler, target: int, node: Node_Index) {
+	pop(&c.targets)
+	kept := 0
+	for b in c.breaks {
+		if b.target == target {
+			patch_jump(c, b.location, node)
+		} else {
+			c.breaks[kept] = b
+			kept += 1
+		}
+	}
+	resize(&c.breaks, kept)
 }
 
 begin_scope :: proc(c: ^Compiler) {

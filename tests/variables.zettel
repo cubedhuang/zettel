@@ -1,0 +1,39 @@
+a, b := 1, 2
+echo a           // expect: 1
+echo b           // expect: 2
+
+// values are evaluated before assigning
+a, b = b, a
+echo a           // expect: 2
+echo b           // expect: 1
+
+a = a + 10
+echo a           // expect: 12
+
+{
+    // locals
+    c := a + 1
+    echo c       // expect: 13
+    a = c
+    {
+        // shadowing an outer local, initialized from it
+        c := c * 2
+        echo c   // expect: 26
+        d, e := c, "inner"
+        echo e   // expect: "inner"
+    }
+    echo c       // expect: 13
+}
+echo a           // expect: 13
+
+// a static declared after a block with a local of the same name
+{ f := 1 }
+f := 2
+echo f           // expect: 2
+
+// blocks shadowing statics
+{
+    a := "local"
+    echo a       // expect: "local"
+}
+echo a           // expect: 13

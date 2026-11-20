@@ -1,0 +1,1 @@
+a, b := 1 // error: fewer values than targets

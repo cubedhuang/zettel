@@ -1,0 +1,46 @@
+// literals
+echo 7           // expect: 7
+echo "hi"        // expect: "hi"
+echo nil         // expect: nil
+echo true        // expect: true
+echo false       // expect: false
+
+// arithmetic and precedence
+echo 1 + 2 * 3   // expect: 7
+echo (1 + 2) * 3 // expect: 9
+echo 10 - 4 - 3  // expect: 3
+echo 1 / 2       // expect: 0.5
+echo -(2 + 3)    // expect: -5
+echo 0 / 0       // expect: nan
+echo 1 / 0       // expect: inf
+
+// comparison and equality
+echo 1 < 2       // expect: true
+echo 2 <= 1      // expect: false
+echo 3 > 2       // expect: true
+echo 2 >= 2      // expect: true
+echo 1 == 1      // expect: true
+echo 1 != 1      // expect: false
+echo 0 / 0 == 0 / 0 // expect: false
+echo nil == false   // expect: false
+echo "a" + "b" == "ab" // expect: true
+
+// strings
+echo "Hello" + " world" // expect: "Hello world"
+
+// only nil and false are falsy
+echo !nil        // expect: true
+echo !0          // expect: false
+echo !""         // expect: false
+
+// `and` and `or` produce an operand and short-circuit
+echo 1 and 2     // expect: 2
+echo nil and 2   // expect: nil
+echo nil or 3    // expect: 3
+echo 4 or 5      // expect: 4
+echo false and echo "skipped" // expect: false
+echo true or echo "skipped"   // expect: true
+
+// statements discard values
+"silent"
+1 + 2

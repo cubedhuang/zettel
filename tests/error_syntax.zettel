@@ -1,0 +1,6 @@
+// statements recover at the end of their line
+a, 1 := 2, 3 // error: can only declare identifiers
+b = 1, 2     // error: more values than targets
+echo (1 +)   // error: expected expression, got ')'
+// a trailing operator continues the expression onto the next line
+echo 1 +     // error: expected expression, got end of input

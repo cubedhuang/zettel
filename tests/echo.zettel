@@ -1,0 +1,12 @@
+// echo writes its operand and produces it
+x := echo 2 * 3  // expect: 6
+echo x           // expect: 6
+
+// the operand extends as far right as possible
+echo 1 + 2 == 3  // expect: true
+y := 1 + echo x * 10 // expect: 60
+echo y           // expect: 61
+
+// nested echoes write inner values first
+echo echo 5      // expect: 5
+                 // expect: 5

@@ -1,0 +1,4 @@
+// output before a runtime error is kept
+echo "before"    // expect: "before"
+echo 1 + "a"     // error: operands must be two numbers or two strings
+echo "after"

@@ -1,0 +1,2 @@
+if d := 1; d { }
+echo d // error: 'd' is not declared

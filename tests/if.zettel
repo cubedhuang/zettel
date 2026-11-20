@@ -1,0 +1,34 @@
+x := 5
+if x > 3 { echo "then" }            // expect: "then"
+if x > 10 { echo "skipped" }
+if x < 3 { echo "skipped" } else { echo "else" } // expect: "else"
+
+if x < 3 {
+    echo "skipped"
+} else if x == 5 {
+    echo "else if" // expect: "else if"
+} else {
+    echo "skipped"
+}
+
+// only nil and false are falsy
+if 0 { echo "zero" } // expect: "zero"
+if nil { echo "skipped" } else if false { echo "skipped" } else { echo "falsy" } // expect: "falsy"
+
+// branches have their own scope
+if true { y := 1; x = x + y }
+echo x // expect: 6
+
+// initializers are in scope for the condition and every branch
+if n := x * 2; n > 100 {
+    echo "skipped"
+} else if m := n + 1; m == 13 {
+    echo n + m // expect: 25
+}
+if a, b := 1, 2; a < b { echo a + b } // expect: 3
+if x = 7; x == 7 { echo "assigned" }  // expect: "assigned"
+
+// an initializer doesn't declare a static
+if n := 1; n { }
+n := "static"
+echo n // expect: "static"

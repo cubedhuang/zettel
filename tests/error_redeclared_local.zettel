@@ -1,0 +1,4 @@
+{
+    b := 1
+    b := 2 // error: 'b' is already declared in this scope
+}

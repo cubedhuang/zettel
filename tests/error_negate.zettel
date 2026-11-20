@@ -1,0 +1,1 @@
+echo -"a" // error: operand must be a number

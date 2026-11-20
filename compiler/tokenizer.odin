@@ -40,6 +40,8 @@ Token_Tag :: enum u8 {
 	Keyword_Else,
 	Keyword_While,
 	Keyword_For,
+	Keyword_Break,
+	Keyword_Continue,
 	Keyword_Fn,
 	Keyword_Return,
 	Keyword_Class,
@@ -83,6 +85,8 @@ token_lexemes := #partial [Token_Tag]string {
 	.Keyword_Else        = "else",
 	.Keyword_While       = "while",
 	.Keyword_For         = "for",
+	.Keyword_Break       = "break",
+	.Keyword_Continue    = "continue",
 	.Keyword_Fn          = "fn",
 	.Keyword_Return      = "return",
 	.Keyword_Class       = "class",
@@ -125,6 +129,8 @@ token_names := [Token_Tag]string {
 	.Keyword_Else        = "'else'",
 	.Keyword_While       = "'while'",
 	.Keyword_For         = "'for'",
+	.Keyword_Break       = "'break'",
+	.Keyword_Continue    = "'continue'",
 	.Keyword_Fn          = "'fn'",
 	.Keyword_Return      = "'return'",
 	.Keyword_Class       = "'class'",
@@ -268,6 +274,10 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 			token.tag = .Keyword_While
 		case "for":
 			token.tag = .Keyword_For
+		case "break":
+			token.tag = .Keyword_Break
+		case "continue":
+			token.tag = .Keyword_Continue
 		case "fn":
 			token.tag = .Keyword_Fn
 		case "return":
@@ -297,7 +307,9 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	     .Identifier,
 	     .Keyword_Nil,
 	     .Keyword_True,
-	     .Keyword_False:
+	     .Keyword_False,
+	     .Keyword_Break,
+	     .Keyword_Continue:
 		t.insert_semicolon = true
 	case:
 		t.insert_semicolon = false

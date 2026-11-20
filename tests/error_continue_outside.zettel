@@ -1,0 +1,3 @@
+if true {
+    continue // error: 'continue' outside of a loop
+}

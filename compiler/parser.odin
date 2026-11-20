@@ -82,6 +82,8 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 // Stmt <- Block
 //       / IfStmt
 //       / WhileStmt
+//       / KEYWORD_BREAK SEMI
+//       / KEYWORD_CONTINUE SEMI
 //       / SimpleStmt SEMI
 //
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE
@@ -93,6 +95,11 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		return parse_if(p)
 	case .Keyword_While:
 		return parse_while(p)
+	case .Keyword_Break, .Keyword_Continue:
+		tag: Node_Tag = .Break if peek_tag(p) == .Keyword_Break else .Continue
+		node = add_node(p, {tag = tag, main_token = advance(p)})
+		expect_stmt_end(p) or_return
+		return node, true
 	}
 
 	node = parse_simple_stmt(p) or_return
@@ -108,7 +115,7 @@ parse_block :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	return add_node(p, {tag = .Block, main_token = open, data = {extra_range = range}}), true
 }
 
-// IfStmt <- KEYWORD_IF Condition Block (KEYWORD_ELSE (IfStmt / Block))?
+// IfStmt <- KEYWORD_IF Condition Block Else?
 parse_if :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	if_token := expect(p, .Keyword_If) or_return
 	init, condition := parse_condition(p) or_return
@@ -126,16 +133,8 @@ parse_if :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 			true
 	}
 
-	else_branch: Node_Index
-	if peek_tag(p) == .Keyword_Else {
-		advance(p)
-		if peek_tag(p) == .Keyword_If {
-			else_branch = parse_if(p) or_return
-		} else {
-			else_branch = parse_block(p) or_return
-		}
-	}
-	extra := add_extra(p, If_Extra{init, then_branch, else_branch})
+	else_branch := parse_else(p) or_return
+	extra := add_extra(p, If_While{init, then_branch, else_branch})
 	return add_node(
 			p,
 			{tag = .If, main_token = if_token, data = {node_and_extra = {condition, extra}}},
@@ -143,13 +142,14 @@ parse_if :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		true
 }
 
-// WhileStmt <- KEYWORD_WHILE Condition Block
+// WhileStmt <- KEYWORD_WHILE Condition Block Else?
 parse_while :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	while_token := expect(p, .Keyword_While) or_return
 	init, condition := parse_condition(p) or_return
 	body := parse_block(p) or_return
+	else_branch := parse_else(p) or_return
 
-	if init == 0 {
+	if init == 0 && else_branch == 0 {
 		return add_node(
 				p,
 				{
@@ -160,12 +160,22 @@ parse_while :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 			),
 			true
 	}
-	extra := add_extra(p, While_Extra{init, body})
+	extra := add_extra(p, If_While{init, body, else_branch})
 	return add_node(
 			p,
 			{tag = .While, main_token = while_token, data = {node_and_extra = {condition, extra}}},
 		),
 		true
+}
+
+// Else <- KEYWORD_ELSE (IfStmt / Block)
+//
+// Returns 0 if there's no `else`.
+parse_else :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	if peek_tag(p) != .Keyword_Else do return 0, true
+	advance(p)
+	if peek_tag(p) == .Keyword_If do return parse_if(p)
+	return parse_block(p)
 }
 
 // Condition <- (SimpleStmt SEMI)? Expr

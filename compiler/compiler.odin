@@ -31,7 +31,18 @@ Compiler :: struct {
 	locals:              [dynamic]Local,
 	// Declarations make statics at depth 0 and locals afterwards.
 	depth:               int,
+	// Enclosing loops, innermost last.
+	loops:               [dynamic]Loop,
+	// `break` jumps to patch, innermost loop's last.
+	breaks:              [dynamic]int,
 	error:               Compile_Error,
+}
+
+Loop :: struct {
+	// Where `continue` jumps.
+	start: int,
+	// Locals deeper than this belong to the loop.
+	depth: int,
 }
 
 Local :: struct {
@@ -67,6 +78,8 @@ Compile_Error_Tag :: enum u8 {
 	Invalid_Assignment_Target,
 	// `node` is the assignment or declaration.
 	Too_Few_Values,
+	// `node` is the `break` or `continue`.
+	Outside_Loop,
 }
 
 error_message :: proc {
@@ -101,6 +114,8 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 		return "can only assign to variables"
 	case .Too_Few_Values:
 		return "fewer values than targets"
+	case .Outside_Loop:
+		return fmt.tprintf("'%v' outside of a loop", token_text(ast, ast.nodes[error.node].main_token))
 	}
 	unreachable()
 }
@@ -127,6 +142,8 @@ compile :: proc(
 	defer delete(c.string_locations)
 	defer delete(c.static_slots)
 	defer delete(c.locals)
+	defer delete(c.loops)
+	defer delete(c.breaks)
 
 	append(&c.static_bytes, ..statics.bytes)
 	append(&c.static_ends, ..statics.ends)
@@ -182,6 +199,8 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		compile_if(c, index)
 	case .While_Simple, .While:
 		compile_while(c, index)
+	case .Break, .Continue:
+		compile_break(c, index)
 	case:
 		compile_expression(c, index)
 		span := node_span(c.ast, index)
@@ -267,7 +286,7 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 }
 
 compile_if :: proc(c: ^Compiler, index: Node_Index) {
-	init, condition, then_branch, else_branch := if_parts(c.ast, index)
+	init, condition, then_branch, else_branch := if_while_parts(c.ast, index)
 	span := token_span(c.ast, c.ast.nodes[index].main_token)
 
 	if init != 0 {
@@ -289,10 +308,15 @@ compile_if :: proc(c: ^Compiler, index: Node_Index) {
 }
 
 compile_while :: proc(c: ^Compiler, index: Node_Index) {
-	init, condition, body := while_parts(c.ast, index)
+	init, condition, body, else_branch := if_while_parts(c.ast, index)
 	span := token_span(c.ast, c.ast.nodes[index].main_token)
-	start := len(c.code)
+	loop := Loop {
+		start = len(c.code),
+		depth = c.depth,
+	}
+	first_break := len(c.breaks)
 
+	append(&c.loops, loop)
 	begin_scope(c)
 	if init != 0 do compile_statement(c, init)
 	compile_expression(c, condition)
@@ -300,12 +324,37 @@ compile_while :: proc(c: ^Compiler, index: Node_Index) {
 	emit(c, .Pop, span)
 	compile_statement(c, body)
 	// Initializer locals are popped each iteration.
-	emit_scope_pops(c, span)
-	emit_loop(c, start, span, index)
+	emit_pops_above(c, loop.depth, span)
+	emit_loop(c, loop.start, span, index)
+	pop(&c.loops)
+	// Breaks inside the `else` belong to an enclosing loop.
+	last_break := len(c.breaks)
 
 	patch_jump(c, exit, index)
 	emit(c, .Pop, span)
+	// The `else` isn't part of the loop, but the initializer's locals are still in scope.
+	if else_branch != 0 do compile_statement(c, else_branch)
 	end_scope(c, span)
+
+	// `break` pops the loop's locals itself, so it skips past `end_scope`'s pops.
+	for location in c.breaks[first_break:last_break] do patch_jump(c, location, index)
+	remove_range(&c.breaks, first_break, last_break)
+}
+
+compile_break :: proc(c: ^Compiler, index: Node_Index) {
+	if len(c.loops) == 0 {
+		fail(c, .Outside_Loop, index)
+		return
+	}
+	loop := c.loops[len(c.loops) - 1]
+	span := node_span(c.ast, index)
+
+	emit_pops_above(c, loop.depth, span)
+	if c.ast.nodes[index].tag == .Break {
+		append(&c.breaks, emit_jump(c, .Jump, span))
+	} else {
+		emit_loop(c, loop.start, span, index)
+	}
 }
 
 begin_scope :: proc(c: ^Compiler) {
@@ -436,10 +485,10 @@ emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: com
 	emit_u16(c, variable.slot, span)
 }
 
-// Pops the current scope's locals from the stack without ending the scope.
-emit_scope_pops :: proc(c: ^Compiler, span: common.Span) {
+// Pops locals deeper than `depth` from the stack while keeping them declared.
+emit_pops_above :: proc(c: ^Compiler, depth: int, span: common.Span) {
 	#reverse for local in c.locals {
-		if local.depth < c.depth do break
+		if local.depth <= depth do break
 		emit(c, .Pop, span)
 	}
 }

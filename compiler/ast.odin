@@ -60,35 +60,22 @@ assign_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
 	panic("tag of assign_values node must be assign or decl")
 }
 
-// `init` and `else_branch` are 0 when missing.
-if_parts :: proc(
+// For `If_Simple`, `If`, `While_Simple`, and `While`. `init` and `else_branch` are 0 when missing.
+if_while_parts :: proc(
 	ast: Ast,
 	index: Node_Index,
 ) -> (
-	init, condition, then_branch, else_branch: Node_Index,
+	init, condition, body, else_branch: Node_Index,
 ) {
 	node := ast.nodes[index]
 	#partial switch node.tag {
-	case .If_Simple:
+	case .If_Simple, .While_Simple:
 		return 0, node.data.node_and_node.lhs, node.data.node_and_node.rhs, 0
-	case .If:
-		extra := extra_data(ast, node.data.node_and_extra.extra, If_Extra)
-		return extra.init, node.data.node_and_extra.node, extra.then_branch, extra.else_branch
+	case .If, .While:
+		extra := extra_data(ast, node.data.node_and_extra.extra, If_While)
+		return extra.init, node.data.node_and_extra.node, extra.body, extra.else_branch
 	}
-	panic("tag of if_parts node must be an if")
-}
-
-// `init` is 0 for `While_Simple`.
-while_parts :: proc(ast: Ast, index: Node_Index) -> (init, condition, body: Node_Index) {
-	node := ast.nodes[index]
-	#partial switch node.tag {
-	case .While_Simple:
-		return 0, node.data.node_and_node.lhs, node.data.node_and_node.rhs
-	case .While:
-		extra := extra_data(ast, node.data.node_and_extra.extra, While_Extra)
-		return extra.init, node.data.node_and_extra.node, extra.body
-	}
-	panic("tag of while_parts node must be a while")
+	panic("tag of if_while_parts node must be an if or while")
 }
 
 token_text :: proc(ast: Ast, index: Token_Index) -> string {
@@ -165,6 +152,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .If,
 		     .While_Simple,
 		     .While,
+		     .Break,
+		     .Continue,
 		     .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -213,15 +202,13 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			token += 1
 			for ast.tokens[token].tag == .Semi do token += 1
 			return token
-		case .If_Simple:
+		case .If_Simple, .While_Simple:
 			index = node.data.node_and_node.rhs
-		case .If:
-			extra := extra_data(ast, node.data.node_and_extra.extra, If_Extra)
-			index = extra.else_branch if extra.else_branch != 0 else extra.then_branch
-		case .While_Simple:
-			index = node.data.node_and_node.rhs
-		case .While:
-			index = extra_data(ast, node.data.node_and_extra.extra, While_Extra).body
+		case .If, .While:
+			extra := extra_data(ast, node.data.node_and_extra.extra, If_While)
+			index = extra.else_branch if extra.else_branch != 0 else extra.body
+		case .Break, .Continue:
+			return node.main_token
 		case .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -311,7 +298,7 @@ Node_Tag :: enum u8 {
 	// `if init; node then_branch else else_branch`, where `init` and the `else` are optional.
 	//
 	// The `data` field is `node_and_extra`. The node is the condition and the extra points at an
-	// `If_Extra`.
+	// `If_While`.
 	//
 	// The `main_token` field is the `if`.
 	If,
@@ -321,13 +308,17 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `while`.
 	While_Simple,
-	// `while init; node body`. The initializer runs before every check of the condition.
+	// `while init; node body else else_branch`, where `init` and the `else` are optional.
 	//
 	// The `data` field is `node_and_extra`. The node is the condition and the extra points at a
-	// `While_Extra`.
+	// `If_While`.
 	//
 	// The `main_token` field is the `while`.
 	While,
+	// `break`. The `data` field is unused.
+	Break,
+	// `continue`. The `data` field is unused.
+	Continue,
 
 	// ---------- Expressions ----------
 
@@ -417,20 +408,13 @@ Multi_Assign :: struct {
 	rhs: Node_Range,
 }
 
-If_Extra :: struct {
-	// Optional.
+If_While :: struct {
+	// Optional simple statement.
 	init:        Node_Index,
 	// A `Block`.
-	then_branch: Node_Index,
+	body:        Node_Index,
 	// Optional `Block`, `If_Simple`, or `If`.
 	else_branch: Node_Index,
-}
-
-While_Extra :: struct {
-	// Optional simple statement.
-	init: Node_Index,
-	// A `Block`.
-	body: Node_Index,
 }
 
 Error :: struct {

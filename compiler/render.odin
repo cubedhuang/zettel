@@ -30,9 +30,10 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_byte(w, ' ')
 		render_node_list(w, ast, assign_values(ast, index), is_multi, indent)
 		io.write_byte(w, ')')
-	case .If_Simple, .If:
-		init, condition, then_branch, else_branch := if_parts(ast, index)
-		io.write_string(w, "(if ")
+	case .If_Simple, .If, .While_Simple, .While:
+		init, condition, body, else_branch := if_while_parts(ast, index)
+		is_if := node.tag == .If_Simple || node.tag == .If
+		io.write_string(w, "(if " if is_if else "(while ")
 		if init != 0 {
 			render_node(w, ast, init, indent)
 			io.write_string(w, " ")
@@ -40,24 +41,15 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		render_node(w, ast, condition, indent)
 		io.write_byte(w, '\n')
 		render_indent(w, indent)
-		render_node(w, ast, then_branch, indent + 1)
+		render_node(w, ast, body, indent + 1)
 		if else_branch != 0 {
 			io.write_byte(w, '\n')
 			render_indent(w, indent)
 			render_node(w, ast, else_branch, indent + 1)
 		}
 		io.write_byte(w, ')')
-	case .While_Simple, .While:
-		init, condition, body := while_parts(ast, index)
-		io.write_string(w, "(while ")
-		if init != 0 {
-			render_node(w, ast, init, indent)
-			io.write_string(w, "; ")
-		}
-		render_node(w, ast, condition, indent)
-		io.write_byte(w, ' ')
-		render_node(w, ast, body, indent)
-		io.write_byte(w, ')')
+	case .Break, .Continue:
+		io.write_string(w, token_text(ast, node.main_token))
 	case .Number_Literal:
 		io.write_string(w, token_text(ast, node.main_token))
 	case .String_Literal:

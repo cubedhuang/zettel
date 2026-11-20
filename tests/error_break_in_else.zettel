@@ -1,0 +1,3 @@
+while false { } else {
+    break // error: 'break' outside of a loop
+}

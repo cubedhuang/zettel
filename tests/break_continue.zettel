@@ -1,0 +1,61 @@
+// break leaves the loop
+i := 0
+while true {
+    if i == 3 { break }
+    i = i + 1
+}
+echo i // expect: 3
+
+// continue skips to the next check
+j := 0
+odd := 0
+while j < 6 {
+    j = j + 1
+    if j == 2 or j == 4 { continue }
+    odd = odd + 1
+}
+echo odd // expect: 4
+
+// break and continue pop locals declared inside the loop
+total := 0
+k := 0
+while step := 1; k < 10 {
+    a := k
+    {
+        b := a * 2
+        k = k + step
+        if b == 4 { continue }
+        if b == 14 { break }
+        total = total + b
+    }
+}
+echo total // expect: 38
+echo k     // expect: 8
+
+// locals around the loop are untouched
+{
+    before := "kept"
+    n := 0
+    while n < 5 {
+        inner := n
+        n = n + 1
+        if inner == 1 { continue }
+        if inner == 2 { break }
+    }
+    echo before // expect: "kept"
+    echo n      // expect: 3
+}
+
+// break and continue apply to the innermost loop
+count := 0
+x := 0
+while x < 3 {
+    x = x + 1
+    y := 0
+    while true {
+        y = y + 1
+        if y > x { break }
+        count = count + 1
+    }
+}
+echo count // expect: 6

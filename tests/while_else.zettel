@@ -1,0 +1,49 @@
+// else runs when the condition is false
+i := 0
+while i < 3 { i = i + 1 } else { echo "done" } // expect: "done"
+
+// but not after a break
+while true { break } else { echo "skipped" }
+
+// a loop that never runs still takes the else
+while false { } else { echo "empty" } // expect: "empty"
+
+// else sees the initializer's final values
+a, b := 0, 1
+while n := a + b; n < 10 {
+    a, b = b, n
+} else {
+    echo n // expect: 13
+}
+
+// else if
+found := nil
+k := 0
+while k < 5 {
+    if k == 7 { found = k; break }
+    k = k + 1
+} else if found == nil {
+    echo "not found" // expect: "not found"
+}
+
+// break inside an else refers to the enclosing loop
+outer := 0
+while outer < 10 {
+    outer = outer + 1
+    while false { } else {
+        if outer == 2 { break }
+    }
+}
+echo outer // expect: 2
+
+// continue inside an else, with locals from the initializer in scope
+c := 0
+sum := 0
+while c < 4 {
+    c = c + 1
+    while m := c; false { } else {
+        if m == 2 { continue }
+        sum = sum + m
+    }
+}
+echo sum // expect: 8

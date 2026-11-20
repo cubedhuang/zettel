@@ -3,7 +3,8 @@ package common
 import "core:fmt"
 import "core:io"
 
-disassemble :: proc(w: io.Writer, chunk: Chunk) {
+disassemble :: proc(w: io.Writer, module: Module) {
+	chunk := module.main
 	offset := 0
 	for offset < len(chunk.code) {
 		op := Op(chunk.code[offset])
@@ -18,11 +19,16 @@ disassemble :: proc(w: io.Writer, chunk: Chunk) {
 			case f64:
 				fmt.wprint(w, c, flush = false)
 			case Constant_String:
-				fmt.wprintf(w, "\"%s\"", chunk.string_bytes[c.start:][:c.len], flush = false)
+				fmt.wprintf(w, "\"%s\"", module.string_bytes[c.start:][:c.len], flush = false)
 			}
 		case .Jump, .Jump_If_False, .Jump_If_True:
 			jump := read_u16(chunk.code, offset + 1)
 			fmt.wprintf(w, " -> %v", offset + 3 + int(jump), flush = false)
+		case .Get_Static, .Set_Static:
+			slot := read_u16(chunk.code, offset + 1)
+			fmt.wprintf(w, " [%v] %v", slot, static_name(module.statics, int(slot)), flush = false)
+		case .Get_Local, .Set_Local:
+			fmt.wprintf(w, " [%v]", read_u16(chunk.code, offset + 1), flush = false)
 		}
 
 		io.write_byte(w, '\n')

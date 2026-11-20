@@ -80,7 +80,7 @@ main :: proc() {
 		out: bufio.Writer
 		bufio.writer_init(&out, os.to_writer(os.stdout))
 		defer bufio.writer_destroy(&out)
-		common.disassemble(bufio.writer_to_writer(&out), module.main)
+		common.disassemble(bufio.writer_to_writer(&out), module)
 		bufio.writer_flush(&out)
 		return
 	}
@@ -123,6 +123,8 @@ compile :: proc(
 	r: Reporter,
 	source: ^common.Source,
 	ast: compiler.Ast,
+	statics: common.Static_Names = {},
+	allow_redeclaration := false,
 ) -> (
 	module: common.Module,
 	ok: bool,
@@ -130,7 +132,7 @@ compile :: proc(
 	defer free_all(context.temp_allocator)
 
 	error: compiler.Compile_Error
-	module, error = compiler.compile(ast)
+	module, error = compiler.compile(ast, statics, allow_redeclaration)
 	if error.tag == .None {
 		return module, true
 	}
@@ -140,7 +142,7 @@ compile :: proc(
 		{
 			{
 				span = compiler.node_span(ast, error.node),
-				message = compiler.error_message(error),
+				message = compiler.error_message(ast, error),
 			},
 		},
 	)
@@ -153,7 +155,7 @@ execute :: proc(
 	vm: ^runtime.Vm,
 	module: common.Module,
 ) -> bool {
-	program := runtime.load(vm, module)
+	program := runtime.load(vm, source.path, module)
 	defer runtime.program_destroy(&program)
 
 	error, ok := runtime.run(vm, program)

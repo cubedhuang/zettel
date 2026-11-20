@@ -8,14 +8,41 @@ import "core:strconv"
 // `Compiler` contains intermediate compilation data about a single chunk. After compilation,
 // it's converted into a `common.Module`.
 Compiler :: struct {
-	ast:                Ast,
-	code:               [dynamic]u8,
-	spans:              [dynamic]common.Span,
-	constants:          [dynamic]common.Constant,
-	constant_locations: map[common.Constant]int,
-	string_bytes:       [dynamic]u8,
-	string_locations:   map[string]common.Constant_String,
-	error:              Compile_Error,
+	ast:                 Ast,
+	code:                [dynamic]u8,
+	spans:               [dynamic]common.Span,
+	constants:           [dynamic]common.Constant,
+	constant_locations:  map[common.Constant]int,
+	string_bytes:        [dynamic]u8,
+	// Keys are from the source.
+	string_locations:    map[string]common.Constant_String,
+
+	// Format like `common.Static_Names`.
+	static_bytes:        [dynamic]u8,
+	static_ends:         [dynamic]u32,
+	// Keys are from the source or preview Static_Names.
+	static_slots:        map[string]int,
+	// We want to be able to declare things multiple times in the REPL.
+	allow_redeclaration: bool,
+
+	// Each local's index is its stack slot.
+	locals:              [dynamic]Local,
+	// Declarations make statics at depth 0 and locals afterwards.
+	depth:               int,
+	error:               Compile_Error,
+}
+
+Local :: struct {
+	name:  string,
+	depth: int,
+}
+
+Variable :: struct {
+	kind: enum u8 {
+		Static,
+		Local,
+	},
+	slot: int,
 }
 
 Compile_Error :: struct {
@@ -28,6 +55,16 @@ Compile_Error_Tag :: enum u8 {
 	// TODO: get rid of these with dynamic constant widths
 	Too_Many_Constants,
 	Jump_Too_Large,
+	Too_Many_Statics,
+	Too_Many_Locals,
+	// `node` is the identifier.
+	Undeclared,
+	// `node` is the identifier.
+	Redeclared,
+	// `node` is the target.
+	Invalid_Assignment_Target,
+	// `node` is the assignment or declaration.
+	Too_Few_Values,
 }
 
 error_message :: proc {
@@ -36,7 +73,7 @@ error_message :: proc {
 }
 
 // Uses `context.temp_allocator`.
-compile_error_message :: proc(error: Compile_Error) -> string {
+compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 	switch error.tag {
 	case .None:
 		return ""
@@ -44,18 +81,54 @@ compile_error_message :: proc(error: Compile_Error) -> string {
 		return fmt.tprintf("more than %v constants", common.MAX_CONSTANTS)
 	case .Jump_Too_Large:
 		return fmt.tprintf("jump over more than %v bytes of code", max(u16))
+	case .Too_Many_Statics:
+		return fmt.tprintf("more than %v static variables", common.MAX_STATICS)
+	case .Too_Many_Locals:
+		return fmt.tprintf("more than %v local variables", common.MAX_LOCALS)
+	case .Undeclared:
+		return fmt.tprintf(
+			"'%v' is not declared",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Redeclared:
+		return fmt.tprintf(
+			"'%v' is already declared in this scope",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Invalid_Assignment_Target:
+		return "can only assign to variables"
+	case .Too_Few_Values:
+		return "fewer values than targets"
 	}
 	unreachable()
 }
 
-compile :: proc(ast: Ast) -> (module: common.Module, error: Compile_Error) {
+// `statics` are the names of statics declared by earlier compilations of the same class, such as
+// previous REPL lines. They're copied into `module.statics` along with any new ones.
+compile :: proc(
+	ast: Ast,
+	statics: common.Static_Names = {},
+	allow_redeclaration := false,
+) -> (
+	module: common.Module,
+	error: Compile_Error,
+) {
 	assert(len(ast.errors) == 0, "unable to compile an ast with errors")
 
 	c := Compiler {
-		ast = ast,
+		ast                 = ast,
+		allow_redeclaration = allow_redeclaration,
 	}
 	defer delete(c.constant_locations)
 	defer delete(c.string_locations)
+	defer delete(c.static_slots)
+	defer delete(c.locals)
+
+	append(&c.static_bytes, ..statics.bytes)
+	append(&c.static_ends, ..statics.ends)
+	for slot in 0 ..< common.static_count(statics) {
+		c.static_slots[common.static_name(statics, slot)] = slot
+	}
 
 	compile_root(&c)
 
@@ -64,13 +137,19 @@ compile :: proc(ast: Ast) -> (module: common.Module, error: Compile_Error) {
 		delete(c.spans)
 		delete(c.constants)
 		delete(c.string_bytes)
+		delete(c.static_bytes)
+		delete(c.static_ends)
 		return {}, c.error
 	}
 	module.main = {
-		code         = c.code[:],
-		spans        = c.spans[:],
-		constants    = c.constants[:],
-		string_bytes = c.string_bytes[:],
+		code      = c.code[:],
+		spans     = c.spans[:],
+		constants = c.constants[:],
+	}
+	module.string_bytes = c.string_bytes[:]
+	module.statics = {
+		bytes = c.static_bytes[:],
+		ends  = c.static_ends[:],
 	}
 	return module, {}
 }
@@ -86,11 +165,20 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 	node := c.ast.nodes[index]
 	#partial switch node.tag {
 	case .Block:
+		c.depth += 1
 		for statement in block_statements(c.ast, index) {
 			compile_statement(c, statement)
 		}
-	case .Assign, .Assign_Multi: // TODO: implement this
-	case .Decl, .Decl_Multi: // TODO: implement this
+		c.depth -= 1
+		close := token_span(c.ast, last_token(c.ast, index))
+		for len(c.locals) > 0 && c.locals[len(c.locals) - 1].depth > c.depth {
+			pop(&c.locals)
+			emit(c, .Pop, close)
+		}
+	case .Assign, .Assign_Multi:
+		compile_assign(c, index)
+	case .Decl, .Decl_Multi:
+		compile_decl(c, index)
 	case:
 		compile_expression(c, index)
 		emit(c, .Print, node_span(c.ast, index))
@@ -115,8 +203,15 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		emit(c, .True, span)
 	case .False_Literal:
 		emit(c, .False, span)
-	case .Identifier: // TODO: implement this
-
+	case .Identifier:
+		if variable, ok := resolve(c, index); ok {
+			emit_variable(
+				c,
+				.Get_Static if variable.kind == .Static else .Get_Local,
+				variable,
+				span,
+			)
+		}
 	case .Grouped:
 		compile_expression(c, node.data.token_and_node.node)
 	case .Negate:
@@ -161,6 +256,103 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	}
 }
 
+compile_assign :: proc(c: ^Compiler, index: Node_Index) {
+	targets := assign_targets(c.ast, index)
+	for target in targets {
+		if c.ast.nodes[target].tag != .Identifier {
+			fail(c, .Invalid_Assignment_Target, target)
+			return
+		}
+		if _, ok := resolve(c, target); !ok do return
+	}
+
+	if !compile_values(c, index) do return
+
+	// The last value is on top of the stack.
+	#reverse for target in targets {
+		variable, _ := resolve(c, target)
+		op: common.Op = .Set_Static if variable.kind == .Static else .Set_Local
+		emit_variable(c, op, variable, node_span(c.ast, target))
+	}
+}
+
+compile_decl :: proc(c: ^Compiler, index: Node_Index) {
+	// do values first so shadowing is okay
+	if !compile_values(c, index) do return
+	targets := assign_targets(c.ast, index)
+
+	if c.depth > 0 {
+		for target in targets do declare_local(c, target)
+		return
+	}
+
+	for target in targets {
+		if !declare_static(c, target) do return
+	}
+	#reverse for target in targets {
+		slot := c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]
+		emit_variable(c, .Set_Static, {.Static, slot}, node_span(c.ast, target))
+	}
+}
+
+// Pushes the values of an assignment or declaration in order.
+compile_values :: proc(c: ^Compiler, index: Node_Index) -> (ok: bool) {
+	values := assign_values(c.ast, index)
+	// TODO: allow fewer values once there are multiple returns
+	if len(values) < len(assign_targets(c.ast, index)) {
+		fail(c, .Too_Few_Values, index)
+		return false
+	}
+	for value in values do compile_expression(c, value)
+	return true
+}
+
+declare_local :: proc(c: ^Compiler, identifier: Node_Index) {
+	name := token_text(c.ast, c.ast.nodes[identifier].main_token)
+	#reverse for local in c.locals {
+		if local.depth < c.depth do break
+		if local.name == name do fail(c, .Redeclared, identifier)
+	}
+	if len(c.locals) >= common.MAX_LOCALS do fail(c, .Too_Many_Locals, identifier)
+	// append on failure to keep locals in sync with the stack
+	append(&c.locals, Local{name, c.depth})
+}
+
+declare_static :: proc(c: ^Compiler, identifier: Node_Index) -> (ok: bool) {
+	name := token_text(c.ast, c.ast.nodes[identifier].main_token)
+	if name in c.static_slots {
+		if !c.allow_redeclaration {
+			fail(c, .Redeclared, identifier)
+			return false
+		}
+		return true
+	}
+	if len(c.static_ends) >= common.MAX_STATICS {
+		fail(c, .Too_Many_Statics, identifier)
+		return false
+	}
+	c.static_slots[name] = len(c.static_ends)
+	append(&c.static_bytes, name)
+	append(&c.static_ends, u32(len(c.static_bytes)))
+	return true
+}
+
+resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok: bool) {
+	name := token_text(c.ast, c.ast.nodes[identifier].main_token)
+	#reverse for local, slot in c.locals {
+		if local.name == name do return {.Local, slot}, true
+	}
+	if slot, found := c.static_slots[name]; found {
+		return {.Static, slot}, true
+	}
+	fail(c, .Undeclared, identifier)
+	return
+}
+
+fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index) {
+	if c.error.tag == .None do c.error = {tag, node}
+}
+
 emit :: proc(c: ^Compiler, op: common.Op, span: common.Span) {
 	emit_byte(c, u8(op), span)
 }
@@ -170,11 +362,20 @@ emit_byte :: proc(c: ^Compiler, byte: u8, span: common.Span) {
 	append(&c.spans, span)
 }
 
+emit_u16 :: proc(c: ^Compiler, value: int, span: common.Span) {
+	emit_byte(c, u8(value), span)
+	emit_byte(c, u8(value >> 8), span)
+}
+
+emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: common.Span) {
+	emit(c, op, span)
+	emit_u16(c, variable.slot, span)
+}
+
 // Returns the offset's location for `patch_jump`.
 emit_jump :: proc(c: ^Compiler, op: common.Op, span: common.Span) -> int {
 	emit(c, op, span)
-	emit_byte(c, 0xff, span)
-	emit_byte(c, 0xff, span)
+	emit_u16(c, 0xffff, span)
 	return len(c.code) - 2
 }
 
@@ -182,7 +383,7 @@ emit_jump :: proc(c: ^Compiler, op: common.Op, span: common.Span) -> int {
 patch_jump :: proc(c: ^Compiler, location: int, node: Node_Index) {
 	jump := len(c.code) - (location + 2)
 	if jump > int(max(u16)) {
-		if c.error.tag == .None do c.error = {.Jump_Too_Large, node}
+		fail(c, .Jump_Too_Large, node)
 		return
 	}
 	c.code[location] = u8(jump)
@@ -195,7 +396,7 @@ emit_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index)
 	if !ok {
 		index = len(c.constants)
 		if index >= common.MAX_CONSTANTS {
-			if c.error.tag == .None do c.error = {.Too_Many_Constants, node}
+			fail(c, .Too_Many_Constants, node)
 			return
 		}
 		append(&c.constants, constant)
@@ -204,8 +405,7 @@ emit_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index)
 
 	span := node_span(c.ast, node)
 	emit(c, .Constant, span)
-	emit_byte(c, u8(index), span)
-	emit_byte(c, u8(index >> 8), span)
+	emit_u16(c, index, span)
 }
 
 add_string :: proc(c: ^Compiler, source: string) -> common.Constant_String {

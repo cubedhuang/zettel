@@ -10,3 +10,10 @@
 }
 7
 "Hello" + " world"
+
+a, b := 6, 9
+a * b + a + b
+{
+    a := 4
+    a * b + a + b
+}

@@ -9,15 +9,20 @@ Vm :: struct {
 	stack:   [dynamic]Value,
 	objects: ^Obj,
 	strings: map[string]^Obj_String,
+	// path --> root class. Keys are owned.
+	modules: map[string]^Obj_Class,
 }
 
 vm_destroy :: proc(vm: ^Vm) {
 	delete(vm.stack)
+	delete(vm.strings)
+	for path in vm.modules do delete(path)
+	delete(vm.modules)
 
 	current := vm.objects
 	for current != nil {
 		next := current.next
-		free(current)
+		obj_free(current)
 		current = next
 	}
 }
@@ -29,6 +34,7 @@ Runtime_Error :: struct {
 
 run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 	chunk := program.main
+	statics := program.class.statics[:]
 	ip := 0
 
 	for {
@@ -129,6 +135,22 @@ run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 			jump := int(common.read_u16(chunk.code, ip))
 			ip += 2
 			if !is_falsy(vm_peek(vm)) do ip += jump
+		case .Get_Static:
+			value := statics[common.read_u16(chunk.code, ip)]
+			ip += 2
+			if value == UNDEFINED {
+				return runtime_error(vm, chunk, start, "variable used before it was defined")
+			}
+			vm_push(vm, value)
+		case .Set_Static:
+			statics[common.read_u16(chunk.code, ip)] = vm_pop(vm)
+			ip += 2
+		case .Get_Local:
+			vm_push(vm, vm.stack[common.read_u16(chunk.code, ip)])
+			ip += 2
+		case .Set_Local:
+			vm.stack[common.read_u16(chunk.code, ip)] = vm_pop(vm)
+			ip += 2
 		case .Pop:
 			vm_pop(vm)
 		case .Print:

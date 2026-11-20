@@ -13,10 +13,13 @@ TAG_NIL :: u64(1)
 // `TAG_TRUE == TAG_FALSE | 1`
 TAG_FALSE :: u64(2)
 TAG_TRUE :: u64(3)
+TAG_UNDEFINED :: u64(4)
 
 NIL :: Value(QNAN | TAG_NIL)
 FALSE :: Value(QNAN | TAG_FALSE)
 TRUE :: Value(QNAN | TAG_TRUE)
+// Static variables whose declaration hasn't run yet.
+UNDEFINED :: Value(QNAN | TAG_UNDEFINED)
 
 write_value :: proc(w: io.Writer, value: Value) {
 	switch {
@@ -63,6 +66,10 @@ write_obj :: proc(w: io.Writer, obj: ^Obj) {
 		io.write_byte(w, '"')
 		io.write_string(w, s.text)
 		io.write_byte(w, '"')
+	case .Class:
+		io.write_string(w, "<class ")
+		io.write_string(w, (^Obj_Class)(obj).name.text)
+		io.write_byte(w, '>')
 	}
 }
 
@@ -73,11 +80,32 @@ Obj :: struct {
 
 Obj_Tag :: enum u8 {
 	String,
+	Class,
 }
 
 Obj_String :: struct {
 	using obj: Obj,
 	text:      string,
+}
+
+Obj_Class :: struct {
+	using obj: Obj,
+	// For a file's root class, the file's stem.
+	name:      ^Obj_String,
+	statics:   [dynamic]Value,
+}
+
+obj_free :: proc(obj: ^Obj) {
+	switch obj.tag {
+	case .String:
+		s := (^Obj_String)(obj)
+		delete(s.text)
+		free(s)
+	case .Class:
+		class := (^Obj_Class)(obj)
+		delete(class.statics)
+		free(class)
+	}
 }
 
 to_value :: proc {

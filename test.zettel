@@ -17,3 +17,9 @@ a * b + a + b
     a := 4
     a * b + a + b
 }
+
+if one := 1; one == 1 {
+    "one is 1"
+} else {
+    "one is not 1"
+}

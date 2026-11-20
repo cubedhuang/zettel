@@ -18,9 +18,7 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_string(w, "(block")
 		for statement in block_statements(ast, index) {
 			io.write_byte(w, '\n')
-			for _ in 0 ..= indent {
-				io.write_string(w, "  ")
-			}
+			render_indent(w, indent)
 			render_node(w, ast, statement, indent + 1)
 		}
 		io.write_byte(w, ')')
@@ -31,6 +29,23 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		render_node_list(w, ast, assign_targets(ast, index), is_multi, indent)
 		io.write_byte(w, ' ')
 		render_node_list(w, ast, assign_values(ast, index), is_multi, indent)
+		io.write_byte(w, ')')
+	case .If_Simple, .If:
+		init, condition, then_branch, else_branch := if_parts(ast, index)
+		io.write_string(w, "(if ")
+		if init != 0 {
+			render_node(w, ast, init, indent)
+			io.write_string(w, " ")
+		}
+		render_node(w, ast, condition, indent)
+		io.write_byte(w, '\n')
+		render_indent(w, indent)
+		render_node(w, ast, then_branch, indent + 1)
+		if else_branch != 0 {
+			io.write_byte(w, '\n')
+			render_indent(w, indent)
+			render_node(w, ast, else_branch, indent + 1)
+		}
 		io.write_byte(w, ')')
 	case .Number_Literal:
 		io.write_string(w, token_text(ast, node.main_token))
@@ -71,6 +86,12 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_byte(w, ' ')
 		render_node(w, ast, node.data.node_and_node.rhs, indent)
 		io.write_byte(w, ')')
+	}
+}
+
+render_indent :: proc(w: io.Writer, indent: int) {
+	for _ in 0 ..= indent {
+		io.write_string(w, "  ")
 	}
 }
 

@@ -80,6 +80,7 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 }
 
 // Stmt <- Block
+//       / IfStmt
 //       / SimpleStmt SEMI
 //
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE
@@ -87,6 +88,8 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	#partial switch peek_tag(p) {
 	case .Brace_Open:
 		return parse_block(p)
+	case .Keyword_If:
+		return parse_if(p)
 	}
 
 	node = parse_simple_stmt(p) or_return
@@ -100,6 +103,59 @@ parse_block :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	range := parse_stmts(p, .Brace_Close)
 	expect(p, .Brace_Close) or_return
 	return add_node(p, {tag = .Block, main_token = open, data = {extra_range = range}}), true
+}
+
+// IfStmt <- KEYWORD_IF (SimpleStmt SEMI)? Expr Block (KEYWORD_ELSE (IfStmt / Block))?
+parse_if :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	if_token := expect(p, .Keyword_If) or_return
+
+	init, condition: Node_Index
+	first := parse_simple_stmt(p) or_return
+	#partial switch p.nodes[first].tag {
+	case .Assign, .Assign_Multi, .Decl, .Decl_Multi:
+		init = first
+		expect(p, .Semi) or_return
+	case:
+		if peek_tag(p) == .Semi {
+			init = first
+			advance(p)
+		}
+	}
+	if init == 0 {
+		condition = first
+	} else {
+		condition = parse_expression(p) or_return
+	}
+
+	then_branch := parse_block(p) or_return
+
+	if init == 0 && peek_tag(p) != .Keyword_Else {
+		return add_node(
+				p,
+				{
+					tag = .If_Simple,
+					main_token = if_token,
+					data = {node_and_node = {condition, then_branch}},
+				},
+			),
+			true
+	}
+
+	else_branch: Node_Index
+	if peek_tag(p) == .Keyword_Else {
+		advance(p)
+		if peek_tag(p) == .Keyword_If {
+			else_branch = parse_if(p) or_return
+		} else {
+			else_branch = parse_block(p) or_return
+		}
+	}
+	extra := add_extra(p, If_Extra{init, then_branch, else_branch})
+	return add_node(
+			p,
+			{tag = .If, main_token = if_token, data = {node_and_extra = {condition, extra}}},
+		),
+		true
 }
 
 // SimpleStmt <- Expr

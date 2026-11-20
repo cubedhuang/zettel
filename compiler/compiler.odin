@@ -165,20 +165,17 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 	node := c.ast.nodes[index]
 	#partial switch node.tag {
 	case .Block:
-		c.depth += 1
+		begin_scope(c)
 		for statement in block_statements(c.ast, index) {
 			compile_statement(c, statement)
 		}
-		c.depth -= 1
-		close := token_span(c.ast, last_token(c.ast, index))
-		for len(c.locals) > 0 && c.locals[len(c.locals) - 1].depth > c.depth {
-			pop(&c.locals)
-			emit(c, .Pop, close)
-		}
+		end_scope(c, token_span(c.ast, last_token(c.ast, index)))
 	case .Assign, .Assign_Multi:
 		compile_assign(c, index)
 	case .Decl, .Decl_Multi:
 		compile_decl(c, index)
+	case .If_Simple, .If:
+		compile_if(c, index)
 	case:
 		compile_expression(c, index)
 		emit(c, .Print, node_span(c.ast, index))
@@ -253,6 +250,40 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		}
 	case:
 		unreachable()
+	}
+}
+
+compile_if :: proc(c: ^Compiler, index: Node_Index) {
+	init, condition, then_branch, else_branch := if_parts(c.ast, index)
+	span := token_span(c.ast, c.ast.nodes[index].main_token)
+
+	if init != 0 {
+		begin_scope(c)
+		compile_statement(c, init)
+	}
+	defer if init != 0 do end_scope(c, span)
+
+	compile_expression(c, condition)
+	to_else := emit_jump(c, .Jump_If_False, span)
+	emit(c, .Pop, span)
+	compile_statement(c, then_branch)
+	to_end := emit_jump(c, .Jump, span)
+
+	patch_jump(c, to_else, index)
+	emit(c, .Pop, span)
+	if else_branch != 0 do compile_statement(c, else_branch)
+	patch_jump(c, to_end, index)
+}
+
+begin_scope :: proc(c: ^Compiler) {
+	c.depth += 1
+}
+
+end_scope :: proc(c: ^Compiler, span: common.Span) {
+	c.depth -= 1
+	for len(c.locals) > 0 && c.locals[len(c.locals) - 1].depth > c.depth {
+		pop(&c.locals)
+		emit(c, .Pop, span)
 	}
 }
 

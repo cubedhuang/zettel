@@ -60,6 +60,24 @@ assign_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
 	panic("tag of assign_values node must be assign or decl")
 }
 
+// `init` and `else_branch` are 0 when missing.
+if_parts :: proc(
+	ast: Ast,
+	index: Node_Index,
+) -> (
+	init, condition, then_branch, else_branch: Node_Index,
+) {
+	node := ast.nodes[index]
+	#partial switch node.tag {
+	case .If_Simple:
+		return 0, node.data.node_and_node.lhs, node.data.node_and_node.rhs, 0
+	case .If:
+		extra := extra_data(ast, node.data.node_and_extra.extra, If_Extra)
+		return extra.init, node.data.node_and_extra.node, extra.then_branch, extra.else_branch
+	}
+	panic("tag of if_parts node must be an if")
+}
+
 token_text :: proc(ast: Ast, index: Token_Index) -> string {
 	tag := ast.tokens[index].tag
 	if lexeme := token_lexemes[tag]; len(lexeme) > 0 {
@@ -130,6 +148,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		case .Root:
 			return 0
 		case .Block,
+		     .If_Simple,
+		     .If,
 		     .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -177,6 +197,11 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			token += 1
 			for ast.tokens[token].tag == .Semi do token += 1
 			return token
+		case .If_Simple:
+			index = node.data.node_and_node.rhs
+		case .If:
+			extra := extra_data(ast, node.data.node_and_extra.extra, If_Extra)
+			index = extra.else_branch if extra.else_branch != 0 else extra.then_branch
 		case .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -257,6 +282,19 @@ Node_Tag :: enum u8 {
 	Decl,
 	// `a, b := ...`. Same layout as `Assign_Multi`.
 	Decl_Multi,
+	// `if lhs rhs`.
+	//
+	// The `data` field is `node_and_node`. `lhs` is the condition and `rhs` is the `Block`.
+	//
+	// The `main_token` field is the `if`.
+	If_Simple,
+	// `if init; node then_branch else else_branch`, where `init` and the `else` are optional.
+	//
+	// The `data` field is `node_and_extra`. The node is the condition and the extra points at an
+	// `If_Extra`.
+	//
+	// The `main_token` field is the `if`.
+	If,
 
 	// ---------- Expressions ----------
 
@@ -342,6 +380,15 @@ Node_Range :: struct {
 Multi_Assign :: struct {
 	lhs: Node_Range,
 	rhs: Node_Range,
+}
+
+If_Extra :: struct {
+	// Optional.
+	init:        Node_Index,
+	// A `Block`.
+	then_branch: Node_Index,
+	// Optional `Block`, `If_Simple`, or `If`.
+	else_branch: Node_Index,
 }
 
 Error :: struct {

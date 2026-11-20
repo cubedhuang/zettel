@@ -81,6 +81,7 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 
 // Stmt <- Block
 //       / IfStmt
+//       / WhileStmt
 //       / SimpleStmt SEMI
 //
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE
@@ -90,6 +91,8 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		return parse_block(p)
 	case .Keyword_If:
 		return parse_if(p)
+	case .Keyword_While:
+		return parse_while(p)
 	}
 
 	node = parse_simple_stmt(p) or_return
@@ -105,28 +108,10 @@ parse_block :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	return add_node(p, {tag = .Block, main_token = open, data = {extra_range = range}}), true
 }
 
-// IfStmt <- KEYWORD_IF (SimpleStmt SEMI)? Expr Block (KEYWORD_ELSE (IfStmt / Block))?
+// IfStmt <- KEYWORD_IF Condition Block (KEYWORD_ELSE (IfStmt / Block))?
 parse_if :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	if_token := expect(p, .Keyword_If) or_return
-
-	init, condition: Node_Index
-	first := parse_simple_stmt(p) or_return
-	#partial switch p.nodes[first].tag {
-	case .Assign, .Assign_Multi, .Decl, .Decl_Multi:
-		init = first
-		expect(p, .Semi) or_return
-	case:
-		if peek_tag(p) == .Semi {
-			init = first
-			advance(p)
-		}
-	}
-	if init == 0 {
-		condition = first
-	} else {
-		condition = parse_expression(p) or_return
-	}
-
+	init, condition := parse_condition(p) or_return
 	then_branch := parse_block(p) or_return
 
 	if init == 0 && peek_tag(p) != .Keyword_Else {
@@ -156,6 +141,49 @@ parse_if :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 			{tag = .If, main_token = if_token, data = {node_and_extra = {condition, extra}}},
 		),
 		true
+}
+
+// WhileStmt <- KEYWORD_WHILE Condition Block
+parse_while :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	while_token := expect(p, .Keyword_While) or_return
+	init, condition := parse_condition(p) or_return
+	body := parse_block(p) or_return
+
+	if init == 0 {
+		return add_node(
+				p,
+				{
+					tag = .While_Simple,
+					main_token = while_token,
+					data = {node_and_node = {condition, body}},
+				},
+			),
+			true
+	}
+	extra := add_extra(p, While_Extra{init, body})
+	return add_node(
+			p,
+			{tag = .While, main_token = while_token, data = {node_and_extra = {condition, extra}}},
+		),
+		true
+}
+
+// Condition <- (SimpleStmt SEMI)? Expr
+//
+// `init` is 0 when missing.
+parse_condition :: proc(p: ^Parser) -> (init, condition: Node_Index, ok: bool) {
+	first := parse_simple_stmt(p) or_return
+	#partial switch p.nodes[first].tag {
+	case .Assign, .Assign_Multi, .Decl, .Decl_Multi:
+		init = first
+		expect(p, .Semi) or_return
+	case:
+		if peek_tag(p) != .Semi do return 0, first, true
+		init = first
+		advance(p)
+	}
+	condition = parse_expression(p) or_return
+	return init, condition, true
 }
 
 // SimpleStmt <- Expr

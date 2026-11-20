@@ -1,0 +1,56 @@
+i := 0
+while i < 3 {
+    echo i // expect: 0
+           // expect: 1
+           // expect: 2
+    i = i + 1
+}
+echo i     // expect: 3
+
+while false { echo "skipped" }
+
+// the initializer runs before every check
+a, b := 0, 1
+while n := a + b; n < 10 {
+    echo n // expect: 1
+           // expect: 2
+           // expect: 3
+           // expect: 5
+           // expect: 8
+    a, b = b, n
+}
+
+// locals declared in the body are fresh each iteration
+total := 0
+j := 0
+while j < 4 {
+    square := j * j
+    total = total + square
+    j = j + 1
+}
+echo total // expect: 14
+
+// nested loops inside a block
+{
+    count := 0
+    x := 0
+    while x < 3 {
+        y := 0
+        while y < x {
+            count = count + 1
+            y = y + 1
+        }
+        x = x + 1
+    }
+    echo count // expect: 3
+}
+
+// enough iterations to catch stack growth
+k := 0
+while step := 1; k < 10000 { extra := step; k = k + extra }
+echo k     // expect: 10000
+
+// an initializer doesn't declare a static
+while m := 1; false { }
+m := "static"
+echo m     // expect: "static"

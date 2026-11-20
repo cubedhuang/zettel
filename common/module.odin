@@ -18,12 +18,12 @@ Static_Names :: struct {
 }
 
 Chunk :: struct {
-	code:         []u8,
+	code:      []u8,
 	// The source of each byte in `code`.
 	//
 	// TODO: make this more space-efficient
-	spans:        []Span,
-	constants:    []Constant,
+	spans:     []Span,
+	constants: []Constant,
 }
 
 Constant :: union {
@@ -70,6 +70,8 @@ Op :: enum u8 {
 	Jump,
 	Jump_If_False,
 	Jump_If_True,
+	// Jumps backwards, also from the end of the instruction.
+	Loop,
 	// Variables
 	//
 	// Get pushes the variable's value and Set pops a value into the variable.
@@ -90,6 +92,7 @@ op_operand_size := #partial [Op]int {
 	.Jump          = 2,
 	.Jump_If_False = 2,
 	.Jump_If_True  = 2,
+	.Loop          = 2,
 	.Get_Static    = 2,
 	.Set_Static    = 2,
 	.Get_Local     = 2,

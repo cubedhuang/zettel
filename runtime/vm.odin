@@ -127,6 +127,9 @@ run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 			vm_push(vm, to_value(lhs >= rhs))
 		case .Jump:
 			ip += 2 + int(common.read_u16(chunk.code, ip))
+		case .Loop:
+			jump := int(common.read_u16(chunk.code, ip))
+			ip += 2 - jump
 		case .Jump_If_False:
 			jump := int(common.read_u16(chunk.code, ip))
 			ip += 2

@@ -180,6 +180,8 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		compile_decl(c, index)
 	case .If_Simple, .If:
 		compile_if(c, index)
+	case .While_Simple, .While:
+		compile_while(c, index)
 	case:
 		compile_expression(c, index)
 		span := node_span(c.ast, index)
@@ -284,6 +286,26 @@ compile_if :: proc(c: ^Compiler, index: Node_Index) {
 	emit(c, .Pop, span)
 	if else_branch != 0 do compile_statement(c, else_branch)
 	patch_jump(c, to_end, index)
+}
+
+compile_while :: proc(c: ^Compiler, index: Node_Index) {
+	init, condition, body := while_parts(c.ast, index)
+	span := token_span(c.ast, c.ast.nodes[index].main_token)
+	start := len(c.code)
+
+	begin_scope(c)
+	if init != 0 do compile_statement(c, init)
+	compile_expression(c, condition)
+	exit := emit_jump(c, .Jump_If_False, span)
+	emit(c, .Pop, span)
+	compile_statement(c, body)
+	// Initializer locals are popped each iteration.
+	emit_scope_pops(c, span)
+	emit_loop(c, start, span, index)
+
+	patch_jump(c, exit, index)
+	emit(c, .Pop, span)
+	end_scope(c, span)
 }
 
 begin_scope :: proc(c: ^Compiler) {
@@ -412,6 +434,22 @@ emit_u16 :: proc(c: ^Compiler, value: int, span: common.Span) {
 emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: common.Span) {
 	emit(c, op, span)
 	emit_u16(c, variable.slot, span)
+}
+
+// Pops the current scope's locals from the stack without ending the scope.
+emit_scope_pops :: proc(c: ^Compiler, span: common.Span) {
+	#reverse for local in c.locals {
+		if local.depth < c.depth do break
+		emit(c, .Pop, span)
+	}
+}
+
+// Jumps back to `start`. `node` is the source of the jump.
+emit_loop :: proc(c: ^Compiler, start: int, span: common.Span, node: Node_Index) {
+	emit(c, .Loop, span)
+	jump := len(c.code) + 2 - start
+	if jump > int(max(u16)) do fail(c, .Jump_Too_Large, node)
+	emit_u16(c, jump, span)
 }
 
 // Returns the offset's location for `patch_jump`.

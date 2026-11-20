@@ -78,6 +78,19 @@ if_parts :: proc(
 	panic("tag of if_parts node must be an if")
 }
 
+// `init` is 0 for `While_Simple`.
+while_parts :: proc(ast: Ast, index: Node_Index) -> (init, condition, body: Node_Index) {
+	node := ast.nodes[index]
+	#partial switch node.tag {
+	case .While_Simple:
+		return 0, node.data.node_and_node.lhs, node.data.node_and_node.rhs
+	case .While:
+		extra := extra_data(ast, node.data.node_and_extra.extra, While_Extra)
+		return extra.init, node.data.node_and_extra.node, extra.body
+	}
+	panic("tag of while_parts node must be a while")
+}
+
 token_text :: proc(ast: Ast, index: Token_Index) -> string {
 	tag := ast.tokens[index].tag
 	if lexeme := token_lexemes[tag]; len(lexeme) > 0 {
@@ -150,6 +163,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		case .Block,
 		     .If_Simple,
 		     .If,
+		     .While_Simple,
+		     .While,
 		     .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -203,6 +218,10 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		case .If:
 			extra := extra_data(ast, node.data.node_and_extra.extra, If_Extra)
 			index = extra.else_branch if extra.else_branch != 0 else extra.then_branch
+		case .While_Simple:
+			index = node.data.node_and_node.rhs
+		case .While:
+			index = extra_data(ast, node.data.node_and_extra.extra, While_Extra).body
 		case .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -296,6 +315,19 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `if`.
 	If,
+	// `while lhs rhs`.
+	//
+	// The `data` field is `node_and_node`. `lhs` is the condition and `rhs` is the `Block`.
+	//
+	// The `main_token` field is the `while`.
+	While_Simple,
+	// `while init; node body`. The initializer runs before every check of the condition.
+	//
+	// The `data` field is `node_and_extra`. The node is the condition and the extra points at a
+	// `While_Extra`.
+	//
+	// The `main_token` field is the `while`.
+	While,
 
 	// ---------- Expressions ----------
 
@@ -392,6 +424,13 @@ If_Extra :: struct {
 	then_branch: Node_Index,
 	// Optional `Block`, `If_Simple`, or `If`.
 	else_branch: Node_Index,
+}
+
+While_Extra :: struct {
+	// Optional simple statement.
+	init: Node_Index,
+	// A `Block`.
+	body: Node_Index,
 }
 
 Error :: struct {

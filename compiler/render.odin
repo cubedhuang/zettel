@@ -47,6 +47,17 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 			render_node(w, ast, else_branch, indent + 1)
 		}
 		io.write_byte(w, ')')
+	case .While_Simple, .While:
+		init, condition, body := while_parts(ast, index)
+		io.write_string(w, "(while ")
+		if init != 0 {
+			render_node(w, ast, init, indent)
+			io.write_string(w, "; ")
+		}
+		render_node(w, ast, condition, indent)
+		io.write_byte(w, ' ')
+		render_node(w, ast, body, indent)
+		io.write_byte(w, ')')
 	case .Number_Literal:
 		io.write_string(w, token_text(ast, node.main_token))
 	case .String_Literal:

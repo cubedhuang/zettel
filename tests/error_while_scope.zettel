@@ -1,0 +1,2 @@
+while w := 1; false { }
+echo w // error: 'w' is not declared

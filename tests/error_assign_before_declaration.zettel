@@ -1,0 +1,4 @@
+{
+    later = 2 // error: 'later' is used before its declaration
+}
+later := 1

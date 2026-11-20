@@ -1,0 +1,29 @@
+// functions can be called before their declaration
+echo square(3) // expect: 9
+fn square(x) { return x * x }
+
+// function bodies can use statics declared after them
+fn describe() { return NAME + "!" }
+NAME := "zettel"
+echo describe() // expect: "zettel!"
+
+// mutual recursion
+fn is_even(n) {
+    if n == 0 { return true }
+    return is_odd(n - 1)
+}
+fn is_odd(n) {
+    if n == 0 { return false }
+    return is_even(n - 1)
+}
+echo is_even(10) // expect: true
+echo is_odd(7)   // expect: true
+
+// functions declared in blocks aren't hoisted, but their bodies see every static
+saved := nil
+{
+    fn local() { return LATER }
+    saved = local
+}
+LATER := "later"
+echo saved() // expect: "later"

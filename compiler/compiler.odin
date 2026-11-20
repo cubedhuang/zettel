@@ -20,6 +20,8 @@ Compiler :: struct {
 	static_ends:         [dynamic]u32,
 	// Keys are from the source or preview Static_Names.
 	static_slots:        map[string]int,
+	// Whether class-body code can use each static yet.
+	static_visible:      [dynamic]bool,
 	// We want to be able to declare things multiple times in the REPL.
 	allow_redeclaration: bool,
 	// Whether top-level expression statements are echoed, like in the REPL.
@@ -111,6 +113,8 @@ Compile_Error_Tag :: enum u8 {
 	Return_Outside_Function,
 	// `node` is the identifier.
 	Capture_Unsupported,
+	// `node` is the identifier.
+	Used_Before_Declaration,
 }
 
 error_message :: proc {
@@ -177,6 +181,11 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 			"'%v' is a local of an enclosing function, and closures aren't supported yet",
 			token_text(ast, ast.nodes[error.node].main_token),
 		)
+	case .Used_Before_Declaration:
+		return fmt.tprintf(
+			"'%v' is used before its declaration",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
 	}
 	unreachable()
 }
@@ -210,11 +219,13 @@ compile :: proc(
 	}
 	defer delete(c.string_locations)
 	defer delete(c.static_slots)
+	defer delete(c.static_visible)
 
 	append(&c.static_bytes, ..statics.bytes)
 	append(&c.static_ends, ..statics.ends)
 	for slot in 0 ..< common.static_count(statics) {
 		c.static_slots[common.static_name(statics, slot)] = slot
+		append(&c.static_visible, true)
 	}
 
 	compile_root(&c)
@@ -243,8 +254,27 @@ finish_chunk :: proc(chunk: ^Chunk_Compiler) -> common.Chunk {
 }
 
 compile_root :: proc(c: ^Compiler) {
-	for statement in root_statements(c.ast) {
-		compile_statement(c, statement)
+	statements := root_statements(c.ast)
+	for statement in statements {
+		#partial switch c.ast.nodes[statement].tag {
+		case .Fn_Decl:
+			name := declared_name(c.ast, statement)
+			if declare_static(c, name, statement) {
+				c.static_visible[c.static_slots[name]] = true
+			}
+		case .Decl, .Decl_Multi:
+			for target in assign_targets(c.ast, statement) {
+				declare_static(c, token_text(c.ast, c.ast.nodes[target].main_token), target)
+			}
+		}
+	}
+
+	// hoist functions
+	for statement in statements {
+		if c.ast.nodes[statement].tag == .Fn_Decl do compile_fn_decl(c, statement)
+	}
+	for statement in statements {
+		if c.ast.nodes[statement].tag != .Fn_Decl do compile_statement(c, statement)
 	}
 	span := token_span(c.ast, Token_Index(len(c.ast.tokens) - 1))
 	emit(c, .Nil, span)
@@ -372,11 +402,7 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 	params, body := fn_parts(c.ast, index)
 
 	is_static := in_static_scope(c)
-	if is_static {
-		if !declare_static(c, name, index) do return
-	} else {
-		declare_local(c, name, index)
-	}
+	if !is_static do declare_local(c, name, index)
 
 	chunk := Chunk_Compiler {
 		enclosing = c.chunk,
@@ -609,7 +635,7 @@ compile_decl :: proc(c: ^Compiler, index: Node_Index) {
 	}
 
 	for target in targets {
-		if !declare_static(c, token_text(c.ast, c.ast.nodes[target].main_token), target) do return
+		c.static_visible[c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]] = true
 	}
 	#reverse for target in targets {
 		slot := c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]
@@ -660,6 +686,7 @@ declare_static :: proc(c: ^Compiler, name: string, node: Node_Index) -> (ok: boo
 	c.static_slots[name] = len(c.static_ends)
 	append(&c.static_bytes, name)
 	append(&c.static_ends, u32(len(c.static_bytes)))
+	append(&c.static_visible, false)
 	return true
 }
 
@@ -677,6 +704,10 @@ resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok
 		}
 	}
 	if slot, found := c.static_slots[name]; found {
+		if c.chunk.enclosing == nil && !c.static_visible[slot] {
+			fail(c, .Used_Before_Declaration, identifier)
+			return
+		}
 		return {.Static, slot}, true
 	}
 	fail(c, .Undeclared, identifier)

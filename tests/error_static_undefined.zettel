@@ -1,0 +1,6 @@
+// a hoisted function can run before a static it uses is assigned
+fn get() {
+    return value // error: variable used before it was defined
+}
+echo get()
+value := 1

@@ -1,2 +1,0 @@
-fn x() {}
-x := 1 // error: 'x' is already declared in this scope

@@ -113,15 +113,18 @@ run :: proc(source: ^common.Source, out: io.Writer) -> (errors: [dynamic]Diagnos
 		return
 	}
 
-	module, compile_error := compiler.compile(ast)
-	if compile_error.tag != .None {
-		append(
-			&errors,
-			Diagnostic {
-				line_of(source, compiler.node_span(ast, compile_error.node)),
-				compiler.error_message(ast, compile_error),
-			},
-		)
+	module, compile_errors := compiler.compile(ast)
+	if len(compile_errors) > 0 {
+		for error in compile_errors {
+			append(
+				&errors,
+				Diagnostic {
+					line_of(source, compiler.node_span(ast, error.node)),
+					compiler.error_message(ast, error),
+				},
+			)
+		}
+		delete(compile_errors)
 		return
 	}
 	defer common.module_destroy(&module)

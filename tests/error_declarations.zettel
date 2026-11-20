@@ -1,0 +1,18 @@
+a := 1
+a := 2 // error: 'a' is already declared in this scope
+{
+    b := 1
+    b := 2 // error: 'b' is already declared in this scope
+}
+fn f(param) {
+    param := 2 // error: 'param' is already declared in this scope
+}
+
+// functions and variables share statics
+x := 1
+fn x() {} // error: 'x' is already declared in this scope
+fn y() {}
+y := 1 // error: 'y' is already declared in this scope
+
+p, q := 1 // error: fewer values than targets
+1 = 2 // error: can only assign to variables

@@ -1,3 +1,0 @@
-a: {
-    a: { } // error: label 'a' is already used by an enclosing statement
-}

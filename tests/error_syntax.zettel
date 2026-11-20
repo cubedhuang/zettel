@@ -4,5 +4,6 @@ b = 1, 2     // error: more values than targets
 echo (1 +)   // error: expected expression, got ')'
 f(1,,2)      // error: expected expression, got ','
 return 1 2   // error: expected end of statement, got a number
+lbl: echo 1  // error: can only label blocks, if statements, and while loops, got 'echo'
 // a trailing operator continues the expression onto the next line
 echo 1 +     // error: expected expression, got end of input

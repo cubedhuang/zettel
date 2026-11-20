@@ -1,0 +1,31 @@
+break // error: 'break' outside of a loop
+if true {
+    continue // error: 'continue' outside of a loop
+}
+break nowhere // error: no enclosing statement is labeled 'nowhere'
+return 1 // error: 'return' outside of a function
+
+// a loop's else isn't part of the loop
+while false { } else {
+    break // error: 'break' outside of a loop
+}
+outer_loop: while false { } else {
+    continue outer_loop // error: can't continue 'outer_loop' from its else
+}
+
+// functions can't break out of the caller's loop
+while true {
+    fn f() {
+        break // error: 'break' outside of a loop
+    }
+}
+
+// labels
+blk: {
+    while true {
+        continue blk // error: can't continue 'blk' because it isn't a loop
+    }
+}
+a: {
+    a: { } // error: label 'a' is already used by an enclosing statement
+}

@@ -1,0 +1,23 @@
+// compilation continues after an error and reports the rest in source order
+echo missing // error: 'missing' is not declared
+echo missing
+fn f() {
+    break // error: 'break' outside of a loop
+}
+
+// declarations with errors still declare their names
+a, b := 1 // error: fewer values than targets
+echo a + b
+
+// statements with errors are still checked
+return ( // error: 'return' outside of a function
+    nope // error: 'nope' is not declared
+)
+1 = ( // error: can only assign to variables
+    also_nope // error: 'also_nope' is not declared
+)
+outer: {
+    outer: { // error: label 'outer' is already used by an enclosing statement
+        echo inner_nope // error: 'inner_nope' is not declared
+    }
+}

@@ -1,1 +1,0 @@
-break nowhere // error: no enclosing statement is labeled 'nowhere'

@@ -1,0 +1,26 @@
+echo z // error: 'z' is not declared
+
+// locals end with their scope
+{ c := 1 }
+echo c // error: 'c' is not declared
+if d := 1; d { }
+echo d // error: 'd' is not declared
+while w := 1; false { }
+echo w // error: 'w' is not declared
+
+// class-body code can't use a static before its declaration
+x := x // error: 'x' is used before its declaration
+echo later // error: 'later' is used before its declaration
+later := 1
+{
+    assigned_later = 2 // error: 'assigned_later' is used before its declaration
+}
+assigned_later := 1
+
+// functions can't capture locals yet
+{
+    captured := 1
+    fn f() {
+        return captured // error: 'captured' is a local of an enclosing function, and closures aren't supported yet
+    }
+}

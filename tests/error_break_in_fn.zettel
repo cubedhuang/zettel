@@ -1,5 +1,0 @@
-while true {
-    fn f() {
-        break // error: 'break' outside of a loop
-    }
-}

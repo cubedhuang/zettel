@@ -1,1 +1,0 @@
-lbl: echo 1 // error: can only label blocks, if statements, and while loops, got 'echo'

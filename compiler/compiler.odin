@@ -3,6 +3,7 @@ package compiler
 
 import "../common"
 import "core:fmt"
+import "core:slice"
 import "core:strconv"
 
 // `Compiler` contains intermediate compilation data about a module. After compilation,
@@ -26,7 +27,13 @@ Compiler :: struct {
 	allow_redeclaration: bool,
 	// Whether top-level expression statements are echoed, like in the REPL.
 	echo_statements:     bool,
-	error:               Compile_Error,
+
+	// Errors
+	errors:              [dynamic]Compile_Error,
+	// Only report some errors once.
+	reported_once:       bit_set[Compile_Error_Tag],
+	// Only report errors for any name once.
+	reported_names:      map[Name_Error]struct{},
 }
 
 // Intermediate data about the class body or a function.
@@ -82,6 +89,11 @@ Break :: struct {
 Compile_Error :: struct {
 	tag:  Compile_Error_Tag,
 	node: Node_Index,
+}
+
+Name_Error :: struct {
+	tag:  Compile_Error_Tag,
+	name: string,
 }
 
 Compile_Error_Tag :: enum u8 {
@@ -199,6 +211,8 @@ declared_name :: proc(ast: Ast, node: Node_Index) -> string {
 
 // `statics` are the names of statics declared by earlier compilations of the same class, such as
 // previous REPL lines. They're copied into `module.statics` along with any new ones.
+//
+// `errors` are in source order and must be freed by the caller.
 compile :: proc(
 	ast: Ast,
 	statics: common.Static_Names = {},
@@ -206,7 +220,7 @@ compile :: proc(
 	echo_statements := false,
 ) -> (
 	module: common.Module,
-	error: Compile_Error,
+	errors: []Compile_Error,
 ) {
 	assert(len(ast.errors) == 0, "unable to compile an ast with errors")
 
@@ -220,6 +234,7 @@ compile :: proc(
 	defer delete(c.string_locations)
 	defer delete(c.static_slots)
 	defer delete(c.static_visible)
+	defer delete(c.reported_names)
 
 	append(&c.static_bytes, ..statics.bytes)
 	append(&c.static_ends, ..statics.ends)
@@ -237,11 +252,25 @@ compile :: proc(
 		ends  = c.static_ends[:],
 	}
 
-	if c.error.tag != .None {
+	if len(c.errors) > 0 {
 		common.module_destroy(&module)
-		return {}, c.error
+		// sort errors by source order
+		Positioned :: struct {
+			position: u32,
+			error:    Compile_Error,
+		}
+		positioned := make([]Positioned, len(c.errors), context.temp_allocator)
+		for error, i in c.errors {
+			positioned[i] = {node_span(ast, error.node).main, error}
+		}
+		slice.stable_sort_by(positioned, proc(a, b: Positioned) -> bool {
+			return a.position < b.position
+		})
+		for p, i in positioned do c.errors[i] = p.error
+		return {}, c.errors[:]
 	}
-	return module, {}
+	delete(c.errors)
+	return module, nil
 }
 
 // Frees the compiler's scratch data and returns the finished chunk.
@@ -437,10 +466,7 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 }
 
 compile_return :: proc(c: ^Compiler, index: Node_Index) {
-	if c.chunk.enclosing == nil {
-		fail(c, .Return_Outside_Function, index)
-		return
-	}
+	if c.chunk.enclosing == nil do fail(c, .Return_Outside_Function, index)
 	value := c.ast.nodes[index].data.node
 	span := node_span(c.ast, index)
 	if value != 0 {
@@ -506,7 +532,7 @@ compile_labeled :: proc(c: ^Compiler, index: Node_Index) {
 	for target in c.chunk.targets {
 		if target.label == label {
 			fail(c, .Label_Shadowed, index)
-			return
+			break
 		}
 	}
 
@@ -604,15 +630,18 @@ end_scope :: proc(c: ^Compiler, span: common.Span) {
 
 compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 	targets := assign_targets(c.ast, index)
+	valid := true
 	for target in targets {
 		if c.ast.nodes[target].tag != .Identifier {
 			fail(c, .Invalid_Assignment_Target, target)
-			return
+			valid = false
+		} else if _, ok := resolve(c, target); !ok {
+			valid = false
 		}
-		if _, ok := resolve(c, target); !ok do return
 	}
 
-	if !compile_values(c, index) do return
+	compile_values(c, index)
+	if !valid do return
 
 	// The last value is on top of the stack.
 	#reverse for target in targets {
@@ -624,7 +653,7 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 
 compile_decl :: proc(c: ^Compiler, index: Node_Index) {
 	// do values first so shadowing is okay
-	if !compile_values(c, index) do return
+	compile_values(c, index)
 	targets := assign_targets(c.ast, index)
 
 	if !in_static_scope(c) {
@@ -644,15 +673,11 @@ compile_decl :: proc(c: ^Compiler, index: Node_Index) {
 }
 
 // Pushes the values of an assignment or declaration in order.
-compile_values :: proc(c: ^Compiler, index: Node_Index) -> (ok: bool) {
+compile_values :: proc(c: ^Compiler, index: Node_Index) {
 	values := assign_values(c.ast, index)
 	// TODO: allow fewer values once there are multiple returns
-	if len(values) < len(assign_targets(c.ast, index)) {
-		fail(c, .Too_Few_Values, index)
-		return false
-	}
+	if len(values) < len(assign_targets(c.ast, index)) do fail(c, .Too_Few_Values, index)
 	for value in values do compile_expression(c, value)
-	return true
 }
 
 in_static_scope :: proc(c: ^Compiler) -> bool {
@@ -714,8 +739,20 @@ resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok
 	return
 }
 
+// Compilation continues after an error to find more
+//
+// Note: The module is discarded, so the code emitted afterwards doesn't need to make sense.
 fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index) {
-	if c.error.tag == .None do c.error = {tag, node}
+	#partial switch tag {
+	case .Too_Many_Constants, .Jump_Too_Large, .Too_Many_Statics, .Too_Many_Locals:
+		if tag in c.reported_once do return
+		c.reported_once += {tag}
+	case .Undeclared, .Used_Before_Declaration, .Capture_Unsupported:
+		key := Name_Error{tag, token_text(c.ast, c.ast.nodes[node].main_token)}
+		if key in c.reported_names do return
+		c.reported_names[key] = {}
+	}
+	append(&c.errors, Compile_Error{tag, node})
 }
 
 emit :: proc(c: ^Compiler, op: common.Op, span: common.Span) {

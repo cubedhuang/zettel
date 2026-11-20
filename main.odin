@@ -132,21 +132,21 @@ compile :: proc(
 ) {
 	defer free_all(context.temp_allocator)
 
-	error: compiler.Compile_Error
-	module, error = compiler.compile(ast, statics, allow_redeclaration, echo_statements)
-	if error.tag == .None {
+	errors: []compiler.Compile_Error
+	module, errors = compiler.compile(ast, statics, allow_redeclaration, echo_statements)
+	if len(errors) == 0 {
 		return module, true
 	}
-	report_diagnostics(
-		r,
-		source,
-		{
-			{
-				span = compiler.node_span(ast, error.node),
-				message = compiler.error_message(ast, error),
-			},
-		},
-	)
+	defer delete(errors)
+
+	diagnostics := make([]report.Diagnostic, len(errors), context.temp_allocator)
+	for error, i in errors {
+		diagnostics[i] = {
+			span    = compiler.node_span(ast, error.node),
+			message = compiler.error_message(ast, error),
+		}
+	}
+	report_diagnostics(r, source, diagnostics)
 	return
 }
 

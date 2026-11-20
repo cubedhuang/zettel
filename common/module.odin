@@ -5,6 +5,7 @@ package common
 // A module is the compiled form of a file, which is the body of a class.
 Module :: struct {
 	main:         Chunk,
+	functions:    []Function,
 	statics:      Static_Names,
 	// Bytes of every chunk's string constants.
 	string_bytes: []u8,
@@ -15,6 +16,13 @@ Static_Names :: struct {
 	bytes: []u8,
 	// The end of each name in `bytes`.
 	ends:  []u32,
+}
+
+Function :: struct {
+	// Index into `Module.string_bytes`.
+	name:  Constant_String,
+	arity: int,
+	chunk: Chunk,
 }
 
 Chunk :: struct {
@@ -29,6 +37,12 @@ Chunk :: struct {
 Constant :: union {
 	f64,
 	Constant_String,
+	Constant_Function,
+}
+
+Constant_Function :: struct {
+	// Index into `Module.functions`.
+	index: u32,
 }
 
 Constant_String :: struct {
@@ -80,9 +94,15 @@ Op :: enum u8 {
 	Set_Static,
 	Get_Local,
 	Set_Local,
+	// Functions
+	//
+	// Calls the value below its arguments, which are on top of the stack. The operand is the
+	// argument count.
+	Call,
+	// Pops the return value and the frame, including the callee, then pushes the return value.
+	Return,
 	//
 	Pop,
-	Return,
 	// Writes the top value to the output without popping it.
 	Echo,
 }
@@ -97,14 +117,18 @@ op_operand_size := #partial [Op]int {
 	.Set_Static    = 2,
 	.Get_Local     = 2,
 	.Set_Local     = 2,
+	.Call          = 1,
 }
 
 MAX_CONSTANTS :: 1 << 16
 MAX_STATICS :: 1 << 16
 MAX_LOCALS :: 1 << 16
+MAX_PARAMETERS :: 255
 
 module_destroy :: proc(module: ^Module) {
 	chunk_destroy(&module.main)
+	for &function in module.functions do chunk_destroy(&function.chunk)
+	delete(module.functions)
 	static_names_destroy(&module.statics)
 	delete(module.string_bytes)
 }
@@ -131,4 +155,12 @@ chunk_destroy :: proc(chunk: ^Chunk) {
 
 read_u16 :: proc(code: []u8, offset: int) -> u16 {
 	return u16(code[offset]) | u16(code[offset + 1]) << 8
+}
+
+constant_string :: proc(module: Module, s: Constant_String) -> string {
+	return string(module.string_bytes[s.start:][:s.len])
+}
+
+function_name :: proc(module: Module, function: Function) -> string {
+	return constant_string(module, function.name)
 }

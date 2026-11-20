@@ -1,0 +1,2 @@
+x := 1
+fn x() {} // error: 'x' is already declared in this scope

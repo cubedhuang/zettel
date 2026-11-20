@@ -309,7 +309,8 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	     .Keyword_True,
 	     .Keyword_False,
 	     .Keyword_Break,
-	     .Keyword_Continue:
+	     .Keyword_Continue,
+	     .Keyword_Return:
 		t.insert_semicolon = true
 	case:
 		t.insert_semicolon = false

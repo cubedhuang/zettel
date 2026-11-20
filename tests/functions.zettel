@@ -1,0 +1,105 @@
+// calling a function runs its body and produces its return value
+fn add(a, b) {
+    return a + b
+}
+echo add(1, 2) // expect: 3
+
+// a function without a return value produces nil
+fn nothing() {}
+echo nothing() // expect: nil
+fn early(x) {
+    if x { return }
+    return "late"
+}
+echo early(true)  // expect: nil
+echo early(false) // expect: "late"
+
+// functions are values
+echo add // expect: <fn add>
+also := add
+echo also(3, 4) // expect: 7
+echo add == also // expect: true
+
+// recursion
+fn fib(n) {
+    if n < 2 { return n }
+    return fib(n - 1) + fib(n - 2)
+}
+echo fib(15) // expect: 610
+
+// functions use statics declared before them
+counter := 0
+fn bump() {
+    counter = counter + 1
+    return counter
+}
+bump()
+bump()
+echo counter // expect: 2
+
+// parameters and locals are separate from the caller's
+fn locals(n) {
+    a := n * 2
+    {
+        b := a + 1
+        n = b
+    }
+    return n
+}
+{
+    a := "caller"
+    echo locals(5) // expect: 11
+    echo a         // expect: "caller"
+}
+
+// arguments are evaluated left to right, and calls nest
+fn second(a, b) { return b }
+echo second(echo 1, echo 2) // expect: 1
+// expect: 2
+// expect: 2
+echo add(add(1, 2), add(3, 4)) // expect: 10
+
+// calling the result of a call
+fn adder() { return add }
+echo adder()(5, 6) // expect: 11
+
+// argument and parameter lists can span lines and end with a comma
+fn spread(
+    a,
+    b,
+) {
+    return a - b
+}
+echo spread(
+    10,
+    4,
+) // expect: 6
+
+// loops inside functions
+fn sum_to(n) {
+    total := 0
+    while i := 0; true {
+        if n == 0 { break }
+        total = total + n
+        n = n - 1
+    }
+    return total
+}
+echo sum_to(4) // expect: 10
+
+// returning from inside a loop
+fn find(limit) {
+    i := 0
+    while i < limit {
+        if i * i > 20 { return i }
+        i = i + 1
+    }
+    return nil
+}
+echo find(10) // expect: 5
+
+// functions declared in blocks are locals
+{
+    fn local(x) { return x + 1 }
+    echo local(1) // expect: 2
+}

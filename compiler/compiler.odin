@@ -5,14 +5,12 @@ import "../common"
 import "core:fmt"
 import "core:strconv"
 
-// `Compiler` contains intermediate compilation data about a single chunk. After compilation,
+// `Compiler` contains intermediate compilation data about a module. After compilation,
 // it's converted into a `common.Module`.
 Compiler :: struct {
 	ast:                 Ast,
-	code:                [dynamic]u8,
-	spans:               [dynamic]common.Span,
-	constants:           [dynamic]common.Constant,
-	constant_locations:  map[common.Constant]int,
+	chunk:               ^Chunk_Compiler,
+	functions:           [dynamic]common.Function,
 	string_bytes:        [dynamic]u8,
 	// Keys are from the source.
 	string_locations:    map[string]common.Constant_String,
@@ -26,16 +24,24 @@ Compiler :: struct {
 	allow_redeclaration: bool,
 	// Whether top-level expression statements are echoed, like in the REPL.
 	echo_statements:     bool,
-
-	// Each local's index is its stack slot.
-	locals:              [dynamic]Local,
-	// Declarations make statics at depth 0 and locals afterwards.
-	depth:               int,
-	// Enclosing loops and labeled statements, innermost last.
-	targets:             [dynamic]Target,
-	// `break` jumps that haven't been patched yet.
-	breaks:              [dynamic]Break,
 	error:               Compile_Error,
+}
+
+// Intermediate data about the class body or a function.
+Chunk_Compiler :: struct {
+	enclosing:          ^Chunk_Compiler,
+	code:               [dynamic]u8,
+	spans:              [dynamic]common.Span,
+	constants:          [dynamic]common.Constant,
+	constant_locations: map[common.Constant]int,
+	// Each local's index is its stack slot relative to the frame.
+	locals:             [dynamic]Local,
+	// Declarations in the class body make statics at depth 0 and locals afterwards.
+	depth:              int,
+	// Enclosing loops and labeled statements, innermost last.
+	targets:            [dynamic]Target,
+	// `break` jumps that haven't been patched yet.
+	breaks:             [dynamic]Break,
 }
 
 Local :: struct {
@@ -85,7 +91,7 @@ Compile_Error_Tag :: enum u8 {
 	Too_Many_Locals,
 	// `node` is the identifier.
 	Undeclared,
-	// `node` is the identifier.
+	// `node` is the identifier or `Fn_Decl`.
 	Redeclared,
 	// `node` is the target.
 	Invalid_Assignment_Target,
@@ -101,6 +107,10 @@ Compile_Error_Tag :: enum u8 {
 	Continue_From_Else,
 	// `node` is the `Labeled`.
 	Label_Shadowed,
+	// `node` is the `return`.
+	Return_Outside_Function,
+	// `node` is the identifier.
+	Capture_Unsupported,
 }
 
 error_message :: proc {
@@ -129,7 +139,7 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 	case .Redeclared:
 		return fmt.tprintf(
 			"'%v' is already declared in this scope",
-			token_text(ast, ast.nodes[error.node].main_token),
+			declared_name(ast, error.node),
 		)
 	case .Invalid_Assignment_Target:
 		return "can only assign to variables"
@@ -160,8 +170,22 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 			"label '%v' is already used by an enclosing statement",
 			token_text(ast, ast.nodes[error.node].main_token),
 		)
+	case .Return_Outside_Function:
+		return "'return' outside of a function"
+	case .Capture_Unsupported:
+		return fmt.tprintf(
+			"'%v' is a local of an enclosing function, and closures aren't supported yet",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
 	}
 	unreachable()
+}
+
+// The name declared by an `Identifier` or `Fn_Decl`.
+declared_name :: proc(ast: Ast, node: Node_Index) -> string {
+	token := ast.nodes[node].main_token
+	if ast.nodes[node].tag == .Fn_Decl do token += 1
+	return token_text(ast, token)
 }
 
 // `statics` are the names of statics declared by earlier compilations of the same class, such as
@@ -177,17 +201,15 @@ compile :: proc(
 ) {
 	assert(len(ast.errors) == 0, "unable to compile an ast with errors")
 
+	main: Chunk_Compiler
 	c := Compiler {
 		ast                 = ast,
+		chunk               = &main,
 		allow_redeclaration = allow_redeclaration,
 		echo_statements     = echo_statements,
 	}
-	defer delete(c.constant_locations)
 	defer delete(c.string_locations)
 	defer delete(c.static_slots)
-	defer delete(c.locals)
-	defer delete(c.targets)
-	defer delete(c.breaks)
 
 	append(&c.static_bytes, ..statics.bytes)
 	append(&c.static_ends, ..statics.ends)
@@ -196,34 +218,37 @@ compile :: proc(
 	}
 
 	compile_root(&c)
-
-	if c.error.tag != .None {
-		delete(c.code)
-		delete(c.spans)
-		delete(c.constants)
-		delete(c.string_bytes)
-		delete(c.static_bytes)
-		delete(c.static_ends)
-		return {}, c.error
-	}
-	module.main = {
-		code      = c.code[:],
-		spans     = c.spans[:],
-		constants = c.constants[:],
-	}
+	module.main = finish_chunk(&main)
+	module.functions = c.functions[:]
 	module.string_bytes = c.string_bytes[:]
 	module.statics = {
 		bytes = c.static_bytes[:],
 		ends  = c.static_ends[:],
 	}
+
+	if c.error.tag != .None {
+		common.module_destroy(&module)
+		return {}, c.error
+	}
 	return module, {}
+}
+
+// Frees the compiler's scratch data and returns the finished chunk.
+finish_chunk :: proc(chunk: ^Chunk_Compiler) -> common.Chunk {
+	delete(chunk.constant_locations)
+	delete(chunk.locals)
+	delete(chunk.targets)
+	delete(chunk.breaks)
+	return {code = chunk.code[:], spans = chunk.spans[:], constants = chunk.constants[:]}
 }
 
 compile_root :: proc(c: ^Compiler) {
 	for statement in root_statements(c.ast) {
 		compile_statement(c, statement)
 	}
-	emit(c, .Return, token_span(c.ast, Token_Index(len(c.ast.tokens) - 1)))
+	span := token_span(c.ast, Token_Index(len(c.ast.tokens) - 1))
+	emit(c, .Nil, span)
+	emit(c, .Return, span)
 }
 
 compile_statement :: proc(c: ^Compiler, index: Node_Index) {
@@ -247,10 +272,14 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		compile_labeled(c, index)
 	case .Break, .Continue:
 		compile_break(c, index)
+	case .Fn_Decl:
+		compile_fn_decl(c, index)
+	case .Return:
+		compile_return(c, index)
 	case:
 		compile_expression(c, index)
 		span := node_span(c.ast, index)
-		if c.echo_statements && c.depth == 0 && node.tag != .Echo {
+		if c.echo_statements && in_static_scope(c) && node.tag != .Echo {
 			emit(c, .Echo, span)
 		}
 		emit(c, .Pop, span)
@@ -295,6 +324,12 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Echo:
 		compile_expression(c, node.data.node)
 		emit(c, .Echo, span)
+	case .Call_One, .Call:
+		callee, args := call_parts(c.ast, index)
+		compile_expression(c, callee)
+		for arg in args do compile_expression(c, arg)
+		emit(c, .Call, span)
+		emit_byte(c, u8(len(args)), span)
 	case .And, .Or:
 		compile_expression(c, node.data.node_and_node.lhs)
 		jump := emit_jump(c, .Jump_If_False if node.tag == .And else .Jump_If_True, span)
@@ -331,6 +366,65 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	}
 }
 
+compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
+	name := declared_name(c.ast, index)
+	name_span := token_span(c.ast, c.ast.nodes[index].main_token + 1)
+	params, body := fn_parts(c.ast, index)
+
+	is_static := in_static_scope(c)
+	if is_static {
+		if !declare_static(c, name, index) do return
+	} else {
+		declare_local(c, name, index)
+	}
+
+	chunk := Chunk_Compiler {
+		enclosing = c.chunk,
+	}
+	c.chunk = &chunk
+	begin_scope(c)
+	for param in params {
+		declare_local(c, token_text(c.ast, c.ast.nodes[param].main_token), param)
+	}
+	for statement in block_statements(c.ast, body) {
+		compile_statement(c, statement)
+	}
+	end_span := token_span(c.ast, last_token(c.ast, body))
+	emit(c, .Nil, end_span)
+	emit(c, .Return, end_span)
+	c.chunk = chunk.enclosing
+
+	function_index := len(c.functions)
+	append(
+		&c.functions,
+		common.Function {
+			name = add_string_bytes(c, name),
+			arity = len(params),
+			chunk = finish_chunk(&chunk),
+		},
+	)
+	// A local function's value lands in its slot.
+	emit_constant(c, common.Constant_Function{u32(function_index)}, index)
+	if is_static {
+		emit_variable(c, .Set_Static, {.Static, c.static_slots[name]}, name_span)
+	}
+}
+
+compile_return :: proc(c: ^Compiler, index: Node_Index) {
+	if c.chunk.enclosing == nil {
+		fail(c, .Return_Outside_Function, index)
+		return
+	}
+	value := c.ast.nodes[index].data.node
+	span := node_span(c.ast, index)
+	if value != 0 {
+		compile_expression(c, value)
+	} else {
+		emit(c, .Nil, span)
+	}
+	emit(c, .Return, span)
+}
+
 compile_if :: proc(c: ^Compiler, index: Node_Index) {
 	init, condition, then_branch, else_branch := if_while_parts(c.ast, index)
 	span := token_span(c.ast, c.ast.nodes[index].main_token)
@@ -358,7 +452,7 @@ compile_while :: proc(c: ^Compiler, index: Node_Index, label := "") {
 	span := token_span(c.ast, c.ast.nodes[index].main_token)
 	target := begin_target(
 		c,
-		{label = label, is_loop = true, start = len(c.code), depth = c.depth},
+		{label = label, is_loop = true, start = len(c.chunk.code), depth = c.chunk.depth},
 	)
 
 	begin_scope(c)
@@ -368,13 +462,13 @@ compile_while :: proc(c: ^Compiler, index: Node_Index, label := "") {
 	emit(c, .Pop, span)
 	compile_statement(c, body)
 	// Initializer locals are popped each iteration.
-	emit_pops_above(c, c.targets[target].depth, span)
-	emit_loop(c, c.targets[target].start, span, index)
+	emit_pops_above(c, c.chunk.targets[target].depth, span)
+	emit_loop(c, c.chunk.targets[target].start, span, index)
 
 	patch_jump(c, exit, index)
 	emit(c, .Pop, span)
 	// The `else` isn't part of the loop, but the initializer's locals are still in scope.
-	c.targets[target].in_else = true
+	c.chunk.targets[target].in_else = true
 	if else_branch != 0 do compile_statement(c, else_branch)
 	end_scope(c, span)
 
@@ -383,7 +477,7 @@ compile_while :: proc(c: ^Compiler, index: Node_Index, label := "") {
 
 compile_labeled :: proc(c: ^Compiler, index: Node_Index) {
 	label := token_text(c.ast, c.ast.nodes[index].main_token)
-	for target in c.targets {
+	for target in c.chunk.targets {
 		if target.label == label {
 			fail(c, .Label_Shadowed, index)
 			return
@@ -395,7 +489,7 @@ compile_labeled :: proc(c: ^Compiler, index: Node_Index) {
 	case .While_Simple, .While:
 		compile_while(c, statement, label)
 	case:
-		target := begin_target(c, {label = label, depth = c.depth})
+		target := begin_target(c, {label = label, depth = c.chunk.depth})
 		compile_statement(c, statement)
 		end_target(c, target, index)
 	}
@@ -407,7 +501,7 @@ compile_break :: proc(c: ^Compiler, index: Node_Index) {
 
 	found := -1
 	if node.data.token == 0 {
-		#reverse for target, i in c.targets {
+		#reverse for target, i in c.chunk.targets {
 			if target.is_loop && !target.in_else {
 				found = i
 				break
@@ -419,7 +513,7 @@ compile_break :: proc(c: ^Compiler, index: Node_Index) {
 		}
 	} else {
 		label := token_text(c.ast, node.data.token)
-		#reverse for target, i in c.targets {
+		#reverse for target, i in c.chunk.targets {
 			if target.label == label {
 				found = i
 				break
@@ -429,20 +523,20 @@ compile_break :: proc(c: ^Compiler, index: Node_Index) {
 		case found < 0:
 			fail(c, .Unknown_Label, index)
 			return
-		case !is_break && !c.targets[found].is_loop:
+		case !is_break && !c.chunk.targets[found].is_loop:
 			fail(c, .Continue_Not_Loop, index)
 			return
-		case !is_break && c.targets[found].in_else:
+		case !is_break && c.chunk.targets[found].in_else:
 			fail(c, .Continue_From_Else, index)
 			return
 		}
 	}
 
-	target := c.targets[found]
+	target := c.chunk.targets[found]
 	span := node_span(c.ast, index)
 	emit_pops_above(c, target.depth, span)
 	if is_break {
-		append(&c.breaks, Break{emit_jump(c, .Jump, span), found})
+		append(&c.chunk.breaks, Break{emit_jump(c, .Jump, span), found})
 	} else {
 		emit_loop(c, target.start, span, index)
 	}
@@ -450,34 +544,34 @@ compile_break :: proc(c: ^Compiler, index: Node_Index) {
 
 // Returns the target's index.
 begin_target :: proc(c: ^Compiler, target: Target) -> int {
-	append(&c.targets, target)
-	return len(c.targets) - 1
+	append(&c.chunk.targets, target)
+	return len(c.chunk.targets) - 1
 }
 
 // Patches the target's breaks to jump here. A `break` pops the target's locals itself, so it skips
 // past any pops emitted when the target's scopes ended.
 end_target :: proc(c: ^Compiler, target: int, node: Node_Index) {
-	pop(&c.targets)
+	pop(&c.chunk.targets)
 	kept := 0
-	for b in c.breaks {
+	for b in c.chunk.breaks {
 		if b.target == target {
 			patch_jump(c, b.location, node)
 		} else {
-			c.breaks[kept] = b
+			c.chunk.breaks[kept] = b
 			kept += 1
 		}
 	}
-	resize(&c.breaks, kept)
+	resize(&c.chunk.breaks, kept)
 }
 
 begin_scope :: proc(c: ^Compiler) {
-	c.depth += 1
+	c.chunk.depth += 1
 }
 
 end_scope :: proc(c: ^Compiler, span: common.Span) {
-	c.depth -= 1
-	for len(c.locals) > 0 && c.locals[len(c.locals) - 1].depth > c.depth {
-		pop(&c.locals)
+	c.chunk.depth -= 1
+	for len(c.chunk.locals) > 0 && c.chunk.locals[len(c.chunk.locals) - 1].depth > c.chunk.depth {
+		pop(&c.chunk.locals)
 		emit(c, .Pop, span)
 	}
 }
@@ -507,13 +601,15 @@ compile_decl :: proc(c: ^Compiler, index: Node_Index) {
 	if !compile_values(c, index) do return
 	targets := assign_targets(c.ast, index)
 
-	if c.depth > 0 {
-		for target in targets do declare_local(c, target)
+	if !in_static_scope(c) {
+		for target in targets {
+			declare_local(c, token_text(c.ast, c.ast.nodes[target].main_token), target)
+		}
 		return
 	}
 
 	for target in targets {
-		if !declare_static(c, target) do return
+		if !declare_static(c, token_text(c.ast, c.ast.nodes[target].main_token), target) do return
 	}
 	#reverse for target in targets {
 		slot := c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]
@@ -533,28 +629,32 @@ compile_values :: proc(c: ^Compiler, index: Node_Index) -> (ok: bool) {
 	return true
 }
 
-declare_local :: proc(c: ^Compiler, identifier: Node_Index) {
-	name := token_text(c.ast, c.ast.nodes[identifier].main_token)
-	#reverse for local in c.locals {
-		if local.depth < c.depth do break
-		if local.name == name do fail(c, .Redeclared, identifier)
-	}
-	if len(c.locals) >= common.MAX_LOCALS do fail(c, .Too_Many_Locals, identifier)
-	// append on failure to keep locals in sync with the stack
-	append(&c.locals, Local{name, c.depth})
+in_static_scope :: proc(c: ^Compiler) -> bool {
+	return c.chunk.enclosing == nil && c.chunk.depth == 0
 }
 
-declare_static :: proc(c: ^Compiler, identifier: Node_Index) -> (ok: bool) {
-	name := token_text(c.ast, c.ast.nodes[identifier].main_token)
+// `node` is the declaration's source for errors.
+declare_local :: proc(c: ^Compiler, name: string, node: Node_Index) {
+	#reverse for local in c.chunk.locals {
+		if local.depth < c.chunk.depth do break
+		if local.name == name do fail(c, .Redeclared, node)
+	}
+	if len(c.chunk.locals) >= common.MAX_LOCALS do fail(c, .Too_Many_Locals, node)
+	// append on failure to keep locals in sync with the stack
+	append(&c.chunk.locals, Local{name, c.chunk.depth})
+}
+
+// `node` is the declaration's source for errors.
+declare_static :: proc(c: ^Compiler, name: string, node: Node_Index) -> (ok: bool) {
 	if name in c.static_slots {
 		if !c.allow_redeclaration {
-			fail(c, .Redeclared, identifier)
+			fail(c, .Redeclared, node)
 			return false
 		}
 		return true
 	}
 	if len(c.static_ends) >= common.MAX_STATICS {
-		fail(c, .Too_Many_Statics, identifier)
+		fail(c, .Too_Many_Statics, node)
 		return false
 	}
 	c.static_slots[name] = len(c.static_ends)
@@ -565,8 +665,16 @@ declare_static :: proc(c: ^Compiler, identifier: Node_Index) -> (ok: bool) {
 
 resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok: bool) {
 	name := token_text(c.ast, c.ast.nodes[identifier].main_token)
-	#reverse for local, slot in c.locals {
+	#reverse for local, slot in c.chunk.locals {
 		if local.name == name do return {.Local, slot}, true
+	}
+	for chunk := c.chunk.enclosing; chunk != nil; chunk = chunk.enclosing {
+		for local in chunk.locals {
+			if local.name == name {
+				fail(c, .Capture_Unsupported, identifier)
+				return
+			}
+		}
 	}
 	if slot, found := c.static_slots[name]; found {
 		return {.Static, slot}, true
@@ -584,8 +692,8 @@ emit :: proc(c: ^Compiler, op: common.Op, span: common.Span) {
 }
 
 emit_byte :: proc(c: ^Compiler, byte: u8, span: common.Span) {
-	append(&c.code, byte)
-	append(&c.spans, span)
+	append(&c.chunk.code, byte)
+	append(&c.chunk.spans, span)
 }
 
 emit_u16 :: proc(c: ^Compiler, value: int, span: common.Span) {
@@ -600,7 +708,7 @@ emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: com
 
 // Pops locals deeper than `depth` from the stack while keeping them declared.
 emit_pops_above :: proc(c: ^Compiler, depth: int, span: common.Span) {
-	#reverse for local in c.locals {
+	#reverse for local in c.chunk.locals {
 		if local.depth <= depth do break
 		emit(c, .Pop, span)
 	}
@@ -609,7 +717,7 @@ emit_pops_above :: proc(c: ^Compiler, depth: int, span: common.Span) {
 // Jumps back to `start`. `node` is the source of the jump.
 emit_loop :: proc(c: ^Compiler, start: int, span: common.Span, node: Node_Index) {
 	emit(c, .Loop, span)
-	jump := len(c.code) + 2 - start
+	jump := len(c.chunk.code) + 2 - start
 	if jump > int(max(u16)) do fail(c, .Jump_Too_Large, node)
 	emit_u16(c, jump, span)
 }
@@ -618,31 +726,31 @@ emit_loop :: proc(c: ^Compiler, start: int, span: common.Span, node: Node_Index)
 emit_jump :: proc(c: ^Compiler, op: common.Op, span: common.Span) -> int {
 	emit(c, op, span)
 	emit_u16(c, 0xffff, span)
-	return len(c.code) - 2
+	return len(c.chunk.code) - 2
 }
 
 // Patches the jump at `location` point to the next instruction. `node` is the source of the jump.
 patch_jump :: proc(c: ^Compiler, location: int, node: Node_Index) {
-	jump := len(c.code) - (location + 2)
+	jump := len(c.chunk.code) - (location + 2)
 	if jump > int(max(u16)) {
 		fail(c, .Jump_Too_Large, node)
 		return
 	}
-	c.code[location] = u8(jump)
-	c.code[location + 1] = u8(jump >> 8)
+	c.chunk.code[location] = u8(jump)
+	c.chunk.code[location + 1] = u8(jump >> 8)
 }
 
 // `node` is the source of the constant.
 emit_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index) {
-	index, ok := c.constant_locations[constant]
+	index, ok := c.chunk.constant_locations[constant]
 	if !ok {
-		index = len(c.constants)
+		index = len(c.chunk.constants)
 		if index >= common.MAX_CONSTANTS {
 			fail(c, .Too_Many_Constants, node)
 			return
 		}
-		append(&c.constants, constant)
-		c.constant_locations[constant] = index
+		append(&c.chunk.constants, constant)
+		c.chunk.constant_locations[constant] = index
 	}
 
 	span := node_span(c.ast, node)
@@ -650,8 +758,12 @@ emit_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index)
 	emit_u16(c, index, span)
 }
 
+// `source` includes the quotes.
 add_string :: proc(c: ^Compiler, source: string) -> common.Constant_String {
-	str := source[1:len(source) - 1]
+	return add_string_bytes(c, source[1:len(source) - 1])
+}
+
+add_string_bytes :: proc(c: ^Compiler, str: string) -> common.Constant_String {
 	if value, ok := c.string_locations[str]; ok {
 		return value
 	}

@@ -1,6 +1,7 @@
 package common
 
 import "core:slice"
+import "core:strings"
 
 // Byte offsets into `Source.text`.
 Span :: struct {
@@ -31,6 +32,21 @@ source_make :: proc(path: string, text: string) -> Source {
 
 source_destroy :: proc(source: ^Source) {
 	delete(source.line_starts)
+}
+
+// The copy owns its path and text. Free it with `source_clone_destroy`.
+source_clone :: proc(source: Source) -> Source {
+	return {
+		path = strings.clone(source.path),
+		text = strings.clone(source.text),
+		line_starts = slice.clone(source.line_starts),
+	}
+}
+
+source_clone_destroy :: proc(source: ^Source) {
+	delete(source.path)
+	delete(source.text)
+	source_destroy(source)
 }
 
 line_count :: proc(source: ^Source) -> int {

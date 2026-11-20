@@ -70,6 +70,14 @@ write_obj :: proc(w: io.Writer, obj: ^Obj) {
 		io.write_string(w, "<class ")
 		io.write_string(w, (^Obj_Class)(obj).name.text)
 		io.write_byte(w, '>')
+	case .Function:
+		function := (^Obj_Function)(obj)
+		io.write_string(w, "<fn")
+		if function.name != nil {
+			io.write_byte(w, ' ')
+			io.write_string(w, function.name.text)
+		}
+		io.write_byte(w, '>')
 	}
 }
 
@@ -81,6 +89,7 @@ Obj :: struct {
 Obj_Tag :: enum u8 {
 	String,
 	Class,
+	Function,
 }
 
 Obj_String :: struct {
@@ -95,6 +104,16 @@ Obj_Class :: struct {
 	statics:   [dynamic]Value,
 }
 
+Obj_Function :: struct {
+	using obj: Obj,
+	// nil for a class body.
+	name:      ^Obj_String,
+	arity:     int,
+	chunk:     Chunk,
+	// The class whose statics the function uses.
+	class:     ^Obj_Class,
+}
+
 obj_free :: proc(obj: ^Obj) {
 	switch obj.tag {
 	case .String:
@@ -105,6 +124,10 @@ obj_free :: proc(obj: ^Obj) {
 		class := (^Obj_Class)(obj)
 		delete(class.statics)
 		free(class)
+	case .Function:
+		function := (^Obj_Function)(obj)
+		chunk_destroy(&function.chunk)
+		free(function)
 	}
 }
 

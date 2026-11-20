@@ -60,6 +60,29 @@ assign_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
 	panic("tag of assign_values node must be assign or decl")
 }
 
+// For `Fn_Decl`. The name is the token after `main_token`.
+fn_parts :: proc(ast: Ast, index: Node_Index) -> (params: []Node_Index, body: Node_Index) {
+	node := ast.nodes[index]
+	assert(node.tag == .Fn_Decl, "tag of fn_parts node must be Fn_Decl")
+	range := extra_data(ast, node.data.node_and_extra.extra, Node_Range)
+	return extra_data_slice(ast, range, Node_Index), node.data.node_and_extra.node
+}
+
+// For `Call_One` and `Call`.
+call_parts :: proc(ast: Ast, index: Node_Index) -> (callee: Node_Index, args: []Node_Index) {
+	node := ast.nodes[index]
+	#partial switch node.tag {
+	case .Call_One:
+		callee = node.data.node_and_node.lhs
+		if node.data.node_and_node.rhs == 0 do return callee, nil
+		return callee, slice.from_ptr(&ast.nodes[index].data.node_and_node.rhs, 1)
+	case .Call:
+		range := extra_data(ast, node.data.node_and_extra.extra, Node_Range)
+		return node.data.node_and_extra.node, extra_data_slice(ast, range, Node_Index)
+	}
+	panic("tag of call_parts node must be a call")
+}
+
 // For `If_Simple`, `If`, `While_Simple`, and `While`. `init` and `else_branch` are 0 when missing.
 if_while_parts :: proc(
 	ast: Ast,
@@ -155,6 +178,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Labeled,
 		     .Break,
 		     .Continue,
+		     .Fn_Decl,
+		     .Return,
 		     .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -183,6 +208,10 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			index = node.data.node_and_node.lhs
 		case .Assign_Multi, .Decl_Multi:
 			index = assign_targets(ast, index)[0]
+		case .Call_One:
+			index = node.data.node_and_node.lhs
+		case .Call:
+			index = node.data.node_and_extra.node
 		}
 	}
 }
@@ -212,6 +241,21 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			index = node.data.node
 		case .Break, .Continue:
 			return node.data.token if node.data.token != 0 else node.main_token
+		case .Fn_Decl:
+			index = node.data.node_and_extra.node
+		case .Return:
+			if node.data.node == 0 do return node.main_token
+			index = node.data.node
+		case .Call_One, .Call:
+			token := node.main_token
+			if _, args := call_parts(ast, index); len(args) > 0 {
+				token = last_token(ast, args[len(args) - 1])
+			}
+			token += 1
+			for ast.tokens[token].tag == .Newline || ast.tokens[token].tag == .Comma {
+				token += 1
+			}
+			return token
 		case .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -330,6 +374,19 @@ Node_Tag :: enum u8 {
 	Break,
 	// `continue` or `continue label`. Same layout as `Break`.
 	Continue,
+	// `fn name(params) body`.
+	//
+	// The `data` field is `node_and_extra`. The node is the `Block` and the extra points at a
+	// `Node_Range` of `Identifier` parameters.
+	//
+	// The `main_token` field is the `fn`, and the name is the token after it.
+	Fn_Decl,
+	// `return` or `return node`.
+	//
+	// The `data` field is `node`, the optional value.
+	//
+	// The `main_token` field is the `return`.
+	Return,
 
 	// ---------- Expressions ----------
 
@@ -361,6 +418,19 @@ Node_Tag :: enum u8 {
 	Not,
 	// `echo node`. Same layout as `Negate`.
 	Echo,
+	// `lhs()` or `lhs(rhs)`.
+	//
+	// The `data` field is `node_and_node`. `lhs` is the callee and `rhs` is the optional argument.
+	//
+	// The `main_token` field is the `(`.
+	Call_One,
+	// `node(args...)`.
+	//
+	// The `data` field is `node_and_extra`. The node is the callee and the extra points at a
+	// `Node_Range` of arguments.
+	//
+	// The `main_token` field is the `(`.
+	Call,
 	// `lhs + rhs`.
 	//
 	// For all binary operations, the `data` field is `node_and_node` with both operands.
@@ -447,6 +517,8 @@ Error_Tag :: enum u8 {
 	Invalid_Declaration_Target,
 	Too_Many_Rhs,
 	Invalid_Label_Target,
+	Too_Many_Parameters,
+	Too_Many_Arguments,
 }
 
 // Uses `context.temp_allocator`.
@@ -467,6 +539,10 @@ parse_error_message :: proc(ast: Ast, error: Error) -> string {
 		return "more values than targets"
 	case .Invalid_Label_Target:
 		return fmt.tprintf("can only label blocks, if statements, and while loops, got %v", found)
+	case .Too_Many_Parameters:
+		return fmt.tprintf("more than %v parameters", common.MAX_PARAMETERS)
+	case .Too_Many_Arguments:
+		return fmt.tprintf("more than %v arguments", common.MAX_PARAMETERS)
 	}
 	unreachable()
 }

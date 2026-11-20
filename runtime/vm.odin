@@ -1,23 +1,39 @@
 package zettel_runtime
 
 import "../common"
+import "core:fmt"
 import "core:io"
 import "core:strings"
 
+MAX_FRAMES :: 1024
+
 Vm :: struct {
+	sources: [dynamic]common.Source,
 	out:     io.Writer,
 	stack:   [dynamic]Value,
+	frames:  [dynamic]Frame,
 	objects: ^Obj,
 	strings: map[string]^Obj_String,
 	// path --> root class. Keys are owned.
 	modules: map[string]^Obj_Class,
 }
 
+Frame :: struct {
+	function: ^Obj_Function,
+	// Only up to date at calls.
+	ip:       int,
+	// Stack index of the frame's first local. The callee is right below it.
+	base:     int,
+}
+
 vm_destroy :: proc(vm: ^Vm) {
 	delete(vm.stack)
+	delete(vm.frames)
 	delete(vm.strings)
 	for path in vm.modules do delete(path)
 	delete(vm.modules)
+	for &source in vm.sources do common.source_clone_destroy(&source)
+	delete(vm.sources)
 
 	current := vm.objects
 	for current != nil {
@@ -28,13 +44,19 @@ vm_destroy :: proc(vm: ^Vm) {
 }
 
 Runtime_Error :: struct {
+	// May use `context.temp_allocator`.
 	message: string,
 	span:    common.Span,
+	// Index into `Vm.sources`.
+	source:  int,
 }
 
-run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
-	chunk := program.main
-	statics := program.class.statics[:]
+// Runs a class body from `load`.
+run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
+	append(&vm.frames, Frame{function = main, base = len(vm.stack)})
+	chunk := main.chunk
+	statics := main.class.statics[:]
+	base := len(vm.stack)
 	ip := 0
 
 	for {
@@ -149,25 +171,66 @@ run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 			statics[common.read_u16(chunk.code, ip)] = vm_pop(vm)
 			ip += 2
 		case .Get_Local:
-			vm_push(vm, vm.stack[common.read_u16(chunk.code, ip)])
+			vm_push(vm, vm.stack[base + int(common.read_u16(chunk.code, ip))])
 			ip += 2
 		case .Set_Local:
-			vm.stack[common.read_u16(chunk.code, ip)] = vm_pop(vm)
+			vm.stack[base + int(common.read_u16(chunk.code, ip))] = vm_pop(vm)
 			ip += 2
+		case .Call:
+			arg_count := int(chunk.code[ip])
+			ip += 1
+			callee, is_obj := as_obj(vm.stack[len(vm.stack) - arg_count - 1])
+			if !is_obj || callee.tag != .Function {
+				return runtime_error(vm, chunk, start, "can only call functions")
+			}
+			function := (^Obj_Function)(callee)
+			if arg_count != function.arity {
+				message := fmt.tprintf(
+					"expected %v argument%v, got %v",
+					function.arity,
+					"" if function.arity == 1 else "s",
+					arg_count,
+				)
+				return runtime_error(vm, chunk, start, message)
+			}
+			if len(vm.frames) >= MAX_FRAMES {
+				return runtime_error(vm, chunk, start, "stack overflow")
+			}
+
+			vm.frames[len(vm.frames) - 1].ip = ip
+			base = len(vm.stack) - arg_count
+			append(&vm.frames, Frame{function = function, base = base})
+			chunk = function.chunk
+			statics = function.class.statics[:]
+			ip = 0
+		case .Return:
+			result := vm_pop(vm)
+			finished := pop(&vm.frames)
+			if len(vm.frames) == 0 {
+				resize(&vm.stack, finished.base)
+				return {}, true
+			}
+			resize(&vm.stack, finished.base - 1)
+			vm_push(vm, result)
+
+			frame := vm.frames[len(vm.frames) - 1]
+			chunk = frame.function.chunk
+			statics = frame.function.class.statics[:]
+			base = frame.base
+			ip = frame.ip
 		case .Pop:
 			vm_pop(vm)
 		case .Echo:
 			write_value(vm.out, vm_peek(vm))
 			io.write_byte(vm.out, '\n')
-		case .Return:
-			return {}, true
 		}
 	}
 }
 
 runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runtime_Error, bool) {
 	clear(&vm.stack)
-	return {message = message, span = chunk.spans[ip]}, false
+	clear(&vm.frames)
+	return {message = message, span = chunk.spans[ip], source = chunk.source}, false
 }
 
 pop_numbers :: proc(vm: ^Vm) -> (lhs, rhs: f64, ok: bool) {
@@ -211,10 +274,15 @@ intern_take :: proc(vm: ^Vm, text: string) -> ^Obj_String {
 	s := new(Obj_String)
 	s.tag = .String
 	s.text = text
-	s.next = vm.objects
-	vm.objects = s
+	track(vm, s)
 	vm.strings[s.text] = s
 	return s
+}
+
+// Adds `obj` to the objects the `Vm` frees.
+track :: proc(vm: ^Vm, obj: ^Obj) {
+	obj.next = vm.objects
+	vm.objects = obj
 }
 
 intern_clone :: proc(vm: ^Vm, text: string) -> ^Obj_String {

@@ -130,11 +130,12 @@ run :: proc(source: ^common.Source, out: io.Writer) -> (errors: [dynamic]Diagnos
 		out = out,
 	}
 	defer runtime.vm_destroy(&vm)
-	program := runtime.load(&vm, source.path, module)
-	defer runtime.program_destroy(&program)
-
-	if runtime_error, ok := runtime.run(&vm, program); !ok {
-		append(&errors, Diagnostic{line_of(source, runtime_error.span), runtime_error.message})
+	if runtime_error, ok := runtime.run(&vm, runtime.load(&vm, source, module)); !ok {
+		error_source := &vm.sources[runtime_error.source]
+		append(
+			&errors,
+			Diagnostic{line_of(error_source, runtime_error.span), runtime_error.message},
+		)
 	}
 	return
 }

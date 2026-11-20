@@ -1,5 +1,6 @@
 package compiler
 
+import "../common"
 import "core:strings"
 
 // `Parser` holds intermediate parsing data. After parsing, it's converted into
@@ -85,6 +86,8 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 //       / LabeledStmt
 //       / KEYWORD_BREAK IDENTIFIER? SEMI
 //       / KEYWORD_CONTINUE IDENTIFIER? SEMI
+//       / FnDecl
+//       / KEYWORD_RETURN Expr? SEMI
 //       / SimpleStmt SEMI
 //
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE
@@ -101,6 +104,19 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		keyword := advance(p)
 		label := advance(p) if peek_tag(p) == .Identifier else 0
 		node = add_node(p, {tag = tag, main_token = keyword, data = {token = label}})
+		expect_stmt_end(p) or_return
+		return node, true
+	case .Keyword_Fn:
+		return parse_fn_decl(p)
+	case .Keyword_Return:
+		keyword := advance(p)
+		value: Node_Index
+		#partial switch peek_tag(p) {
+		case .Semi, .Newline, .Brace_Close, .EOF:
+		case:
+			value = parse_expression(p) or_return
+		}
+		node = add_node(p, {tag = .Return, main_token = keyword, data = {node = value}})
 		expect_stmt_end(p) or_return
 		return node, true
 	case .Identifier:
@@ -131,6 +147,42 @@ parse_labeled :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		return
 	}
 	return add_node(p, {tag = .Labeled, main_token = label, data = {node = statement}}), true
+}
+
+// FnDecl <- KEYWORD_FN IDENTIFIER PAREN_OPEN (IDENTIFIER (COMMA IDENTIFIER)* COMMA?)? PAREN_CLOSE Block
+parse_fn_decl :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	fn_token := expect(p, .Keyword_Fn) or_return
+	expect(p, .Identifier) or_return
+	expect(p, .Paren_Open) or_return
+
+	scratch_top := len(p.scratch)
+	defer non_zero_resize(&p.scratch, scratch_top)
+
+	p.depth += 1
+	for peek_tag(p) != .Paren_Close {
+		identifier, identifier_ok := expect(p, .Identifier)
+		if !identifier_ok {
+			p.depth -= 1
+			return
+		}
+		append(&p.scratch, add_node(p, {tag = .Identifier, main_token = identifier}))
+		if peek_tag(p) != .Comma do break
+		advance(p)
+	}
+	p.depth -= 1
+	if len(p.scratch) - scratch_top > common.MAX_PARAMETERS {
+		add_error(p, {tag = .Too_Many_Parameters})
+		return
+	}
+	expect(p, .Paren_Close) or_return
+
+	params := add_extra(p, make_range(p, p.scratch[scratch_top:]))
+	body := parse_block(p) or_return
+	return add_node(
+			p,
+			{tag = .Fn_Decl, main_token = fn_token, data = {node_and_extra = {body, params}}},
+		),
+		true
 }
 
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE
@@ -407,7 +459,7 @@ binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 
 // Unary <- UnaryOp Unary
 //        / KEYWORD_ECHO Expr
-//        / Primary
+//        / Postfix
 parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	tag: Node_Tag
 	#partial switch peek_tag(p) {
@@ -420,11 +472,63 @@ parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		operand := parse_expression(p) or_return
 		return add_node(p, {tag = .Echo, main_token = echo, data = {node = operand}}), true
 	case:
-		return parse_primary(p)
+		return parse_postfix(p)
 	}
 	operator := advance(p)
 	operand := parse_unary(p) or_return
 	return add_node(p, {tag = tag, main_token = operator, data = {node = operand}}), true
+}
+
+// Postfix <- Primary Call*
+//
+// Call <- PAREN_OPEN (Expr (COMMA Expr)* COMMA?)? PAREN_CLOSE
+parse_postfix :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	node = parse_primary(p) or_return
+	for peek_tag(p) == .Paren_Open {
+		node = parse_call(p, node) or_return
+	}
+	return node, true
+}
+
+parse_call :: proc(p: ^Parser, callee: Node_Index) -> (node: Node_Index, ok: bool) {
+	open := expect(p, .Paren_Open) or_return
+
+	scratch_top := len(p.scratch)
+	defer non_zero_resize(&p.scratch, scratch_top)
+
+	p.depth += 1
+	for peek_tag(p) != .Paren_Close {
+		arg, arg_ok := parse_expression(p)
+		if !arg_ok {
+			p.depth -= 1
+			return
+		}
+		append(&p.scratch, arg)
+		if peek_tag(p) != .Comma do break
+		advance(p)
+	}
+	p.depth -= 1
+	args := p.scratch[scratch_top:]
+	if len(args) > common.MAX_PARAMETERS {
+		add_error(p, {tag = .Too_Many_Arguments})
+		return
+	}
+	expect(p, .Paren_Close) or_return
+
+	if len(args) <= 1 {
+		arg := args[0] if len(args) == 1 else 0
+		return add_node(
+				p,
+				{tag = .Call_One, main_token = open, data = {node_and_node = {callee, arg}}},
+			),
+			true
+	}
+	range := add_extra(p, make_range(p, args))
+	return add_node(
+			p,
+			{tag = .Call, main_token = open, data = {node_and_extra = {callee, range}}},
+		),
+		true
 }
 
 // Primary <- NUMBER

@@ -60,6 +60,32 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 			io.write_byte(w, ' ')
 			io.write_string(w, token_text(ast, node.data.token))
 		}
+	case .Fn_Decl:
+		params, body := fn_parts(ast, index)
+		io.write_string(w, "(fn ")
+		io.write_string(w, token_text(ast, node.main_token + 1))
+		io.write_byte(w, ' ')
+		render_node_list(w, ast, params, true, indent)
+		io.write_byte(w, '\n')
+		render_indent(w, indent)
+		render_node(w, ast, body, indent + 1)
+		io.write_byte(w, ')')
+	case .Return:
+		io.write_string(w, "(return")
+		if node.data.node != 0 {
+			io.write_byte(w, ' ')
+			render_node(w, ast, node.data.node, indent)
+		}
+		io.write_byte(w, ')')
+	case .Call_One, .Call:
+		callee, args := call_parts(ast, index)
+		io.write_string(w, "(call ")
+		render_node(w, ast, callee, indent)
+		for arg in args {
+			io.write_byte(w, ' ')
+			render_node(w, ast, arg, indent)
+		}
+		io.write_byte(w, ')')
 	case .Number_Literal:
 		io.write_string(w, token_text(ast, node.main_token))
 	case .String_Literal:

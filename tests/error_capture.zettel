@@ -1,0 +1,6 @@
+{
+    x := 1
+    fn f() {
+        return x // error: 'x' is a local of an enclosing function, and closures aren't supported yet
+    }
+}

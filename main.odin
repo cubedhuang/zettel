@@ -156,12 +156,15 @@ execute :: proc(
 	vm: ^runtime.Vm,
 	module: common.Module,
 ) -> bool {
-	program := runtime.load(vm, source.path, module)
-	defer runtime.program_destroy(&program)
+	defer free_all(context.temp_allocator)
 
-	error, ok := runtime.run(vm, program)
+	error, ok := runtime.run(vm, runtime.load(vm, source, module))
 	if !ok {
-		report_diagnostics(r, source, {{span = error.span, message = error.message}})
+		report_diagnostics(
+			r,
+			&vm.sources[error.source],
+			{{span = error.span, message = error.message}},
+		)
 	}
 	return ok
 }

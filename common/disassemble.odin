@@ -4,7 +4,20 @@ import "core:fmt"
 import "core:io"
 
 disassemble :: proc(w: io.Writer, module: Module) {
-	chunk := module.main
+	disassemble_chunk(w, module, module.main)
+	for function in module.functions {
+		fmt.wprintf(
+			w,
+			"\nfn %s/%v:\n",
+			function_name(module, function),
+			function.arity,
+			flush = false,
+		)
+		disassemble_chunk(w, module, function.chunk)
+	}
+}
+
+disassemble_chunk :: proc(w: io.Writer, module: Module, chunk: Chunk) {
 	offset := 0
 	for offset < len(chunk.code) {
 		op := Op(chunk.code[offset])
@@ -19,7 +32,14 @@ disassemble :: proc(w: io.Writer, module: Module) {
 			case f64:
 				fmt.wprint(w, c, flush = false)
 			case Constant_String:
-				fmt.wprintf(w, "\"%s\"", module.string_bytes[c.start:][:c.len], flush = false)
+				fmt.wprintf(w, "\"%s\"", constant_string(module, c), flush = false)
+			case Constant_Function:
+				fmt.wprintf(
+					w,
+					"<fn %s>",
+					function_name(module, module.functions[c.index]),
+					flush = false,
+				)
 			}
 		case .Jump, .Jump_If_False, .Jump_If_True:
 			jump := read_u16(chunk.code, offset + 1)
@@ -32,6 +52,8 @@ disassemble :: proc(w: io.Writer, module: Module) {
 			fmt.wprintf(w, " [%v] %v", slot, static_name(module.statics, int(slot)), flush = false)
 		case .Get_Local, .Set_Local:
 			fmt.wprintf(w, " [%v]", read_u16(chunk.code, offset + 1), flush = false)
+		case .Call:
+			fmt.wprintf(w, " (%v)", chunk.code[offset + 1], flush = false)
 		}
 
 		io.write_byte(w, '\n')

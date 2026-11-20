@@ -1,0 +1,4 @@
+fn forever(n) {
+    return forever(n + 1) // error: stack overflow
+}
+forever(0)

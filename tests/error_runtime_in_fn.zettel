@@ -1,0 +1,5 @@
+// errors inside functions point at the failing code
+fn bad(a) {
+    return -a // error: operand must be a number
+}
+bad("x")

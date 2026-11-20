@@ -342,6 +342,7 @@ binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 }
 
 // Unary <- UnaryOp Unary
+//        / KEYWORD_ECHO Expr
 //        / Primary
 parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	tag: Node_Tag
@@ -350,6 +351,10 @@ parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		tag = .Negate
 	case .Bang:
 		tag = .Not
+	case .Keyword_Echo:
+		echo := advance(p)
+		operand := parse_expression(p) or_return
+		return add_node(p, {tag = .Echo, main_token = echo, data = {node = operand}}), true
 	case:
 		return parse_primary(p)
 	}

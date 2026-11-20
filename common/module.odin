@@ -81,8 +81,8 @@ Op :: enum u8 {
 	//
 	Pop,
 	Return,
-	// TODO: get rid of this at some point
-	Print,
+	// Writes the top value to the output without popping it.
+	Echo,
 }
 
 op_operand_size := #partial [Op]int {

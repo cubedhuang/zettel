@@ -153,8 +153,8 @@ run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 			ip += 2
 		case .Pop:
 			vm_pop(vm)
-		case .Print:
-			write_value(vm.out, vm_pop(vm))
+		case .Echo:
+			write_value(vm.out, vm_peek(vm))
 			io.write_byte(vm.out, '\n')
 		case .Return:
 			return {}, true

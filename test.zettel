@@ -4,22 +4,22 @@
         1 + 1
         (4 - 5) / -6
     }
-    1 and 2
-    nil or false
-    false or 67
+    echo 1 and 2
+    echo nil or false
+    echo false or 67
 }
 7
-"Hello" + " world"
+echo "Hello" + " world"
 
 a, b := 6, 9
-a * b + a + b
+echo a * b + a + b
 {
     a := 4
-    a * b + a + b
+    echo a * b + a + b
 }
 
 if one := 1; one == 1 {
-    "one is 1"
+    echo "one is 1"
 } else {
-    "one is not 1"
+    echo "one is not 1"
 }

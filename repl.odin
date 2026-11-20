@@ -49,7 +49,14 @@ repl_evaluate :: proc(r: Reporter, state: ^Repl, text: string) {
 		return
 	}
 
-	module, ok := compile(r, &source, ast, state.statics, allow_redeclaration = true)
+	module, ok := compile(
+		r,
+		&source,
+		ast,
+		state.statics,
+		allow_redeclaration = true,
+		echo_statements = true,
+	)
 	if !ok do return
 	defer common.module_destroy(&module)
 

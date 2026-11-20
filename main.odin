@@ -125,6 +125,7 @@ compile :: proc(
 	ast: compiler.Ast,
 	statics: common.Static_Names = {},
 	allow_redeclaration := false,
+	echo_statements := false,
 ) -> (
 	module: common.Module,
 	ok: bool,
@@ -132,7 +133,7 @@ compile :: proc(
 	defer free_all(context.temp_allocator)
 
 	error: compiler.Compile_Error
-	module, error = compiler.compile(ast, statics, allow_redeclaration)
+	module, error = compiler.compile(ast, statics, allow_redeclaration, echo_statements)
 	if error.tag == .None {
 		return module, true
 	}

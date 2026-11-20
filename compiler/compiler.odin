@@ -24,6 +24,8 @@ Compiler :: struct {
 	static_slots:        map[string]int,
 	// We want to be able to declare things multiple times in the REPL.
 	allow_redeclaration: bool,
+	// Whether top-level expression statements are echoed, like in the REPL.
+	echo_statements:     bool,
 
 	// Each local's index is its stack slot.
 	locals:              [dynamic]Local,
@@ -109,6 +111,7 @@ compile :: proc(
 	ast: Ast,
 	statics: common.Static_Names = {},
 	allow_redeclaration := false,
+	echo_statements := false,
 ) -> (
 	module: common.Module,
 	error: Compile_Error,
@@ -118,6 +121,7 @@ compile :: proc(
 	c := Compiler {
 		ast                 = ast,
 		allow_redeclaration = allow_redeclaration,
+		echo_statements     = echo_statements,
 	}
 	defer delete(c.constant_locations)
 	defer delete(c.string_locations)
@@ -178,7 +182,11 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		compile_if(c, index)
 	case:
 		compile_expression(c, index)
-		emit(c, .Print, node_span(c.ast, index))
+		span := node_span(c.ast, index)
+		if c.echo_statements && c.depth == 0 && node.tag != .Echo {
+			emit(c, .Echo, span)
+		}
+		emit(c, .Pop, span)
 	}
 }
 
@@ -217,6 +225,9 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Not:
 		compile_expression(c, node.data.node)
 		emit(c, .Not, span)
+	case .Echo:
+		compile_expression(c, node.data.node)
+		emit(c, .Echo, span)
 	case .And, .Or:
 		compile_expression(c, node.data.node_and_node.lhs)
 		jump := emit_jump(c, .Jump_If_False if node.tag == .And else .Jump_If_True, span)

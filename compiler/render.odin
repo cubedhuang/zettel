@@ -67,6 +67,10 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_string(w, "(! ")
 		render_node(w, ast, node.data.node, indent)
 		io.write_byte(w, ')')
+	case .Echo:
+		io.write_string(w, "(echo ")
+		render_node(w, ast, node.data.node, indent)
+		io.write_byte(w, ')')
 	case .Add,
 	     .Sub,
 	     .Mul,

@@ -44,6 +44,7 @@ Token_Tag :: enum u8 {
 	Keyword_Return,
 	Keyword_Class,
 	Keyword_Constructor,
+	Keyword_Echo,
 	// Dynamic content
 	Number,
 	String,
@@ -86,6 +87,7 @@ token_lexemes := #partial [Token_Tag]string {
 	.Keyword_Return      = "return",
 	.Keyword_Class       = "class",
 	.Keyword_Constructor = "constructor",
+	.Keyword_Echo        = "echo",
 }
 
 token_names := [Token_Tag]string {
@@ -127,6 +129,7 @@ token_names := [Token_Tag]string {
 	.Keyword_Return      = "'return'",
 	.Keyword_Class       = "'class'",
 	.Keyword_Constructor = "'constructor'",
+	.Keyword_Echo        = "'echo'",
 	// Dynamic content
 	.Number              = "a number",
 	.String              = "a string",
@@ -162,6 +165,11 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 		case '\n':
 			if t.insert_semicolon do break skip_whitespace
 			t.offset += 1
+		case '/':
+			if t.offset + 1 >= len(t.source) || t.source[t.offset + 1] != '/' {
+				break skip_whitespace
+			}
+			for t.offset < len(t.source) && t.source[t.offset] != '\n' do t.offset += 1
 		case:
 			break skip_whitespace
 		}
@@ -268,6 +276,8 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 			token.tag = .Keyword_Class
 		case "constructor":
 			token.tag = .Keyword_Constructor
+		case "echo":
+			token.tag = .Keyword_Echo
 		}
 
 	// non-ASCII characters outside of strings are invalid

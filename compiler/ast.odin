@@ -158,7 +158,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Identifier,
 		     .Grouped,
 		     .Negate,
-		     .Not:
+		     .Not,
+		     .Echo:
 			return node.main_token
 		case .Assign,
 		     .Decl,
@@ -211,7 +212,7 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			return node.main_token
 		case .Grouped:
 			return node.data.token_and_node.token
-		case .Negate, .Not:
+		case .Negate, .Not, .Echo:
 			index = node.data.node
 		case .Assign,
 		     .Decl,
@@ -324,6 +325,8 @@ Node_Tag :: enum u8 {
 	Negate,
 	// `!node`. Same layout as `Negate`.
 	Not,
+	// `echo node`. Same layout as `Negate`.
+	Echo,
 	// `lhs + rhs`.
 	//
 	// For all binary operations, the `data` field is `node_and_node` with both operands.

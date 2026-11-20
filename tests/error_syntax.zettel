@@ -5,5 +5,25 @@ echo (1 +)   // error: expected expression, got ')'
 f(1,,2)      // error: expected expression, got ','
 return 1 2   // error: expected end of statement, got a number
 lbl: echo 1  // error: can only label blocks, if statements, and while loops, got 'echo'
+}            // error: expected statement, got '}'
+
+// recovery skips the blocks of a broken statement
+fn (a) {      // error: expected an identifier, got '('
+    return a
+}
+if x := 1 {   // error: expected ';', got '{'
+    echo x
+}
+{
+    while (1 + ) { echo 1 } // error: expected expression, got ')'
+    echo "still in the block"
+}
+
+// 'else' on the next line is still parsed as part of the if
+if true { }
+else if false { } // error: 'else' must be on the same line as the '}' before it
+else { }      // error: 'else' must be on the same line as the '}' before it
+else { }      // error: expected statement, got 'else'
+
 // a trailing operator continues the expression onto the next line
 echo 1 +     // error: expected expression, got end of input

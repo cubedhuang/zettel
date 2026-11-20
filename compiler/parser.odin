@@ -65,7 +65,7 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 		}
 		// not in a `{}` block
 		if tag == .Brace_Close {
-			add_error(p, {tag = .Expected_Expression})
+			add_error(p, {tag = .Expected_Statement})
 			advance(p)
 			continue
 		}
@@ -123,6 +123,19 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		if p.tokens[p.i + 1].tag == .Colon && p.tokens[p.i + 2].tag != .Eq {
 			return parse_labeled(p)
 		}
+	// FIRST(Expr)
+	case .Number,
+	     .String,
+	     .Keyword_Nil,
+	     .Keyword_True,
+	     .Keyword_False,
+	     .Paren_Open,
+	     .Minus,
+	     .Bang,
+	     .Keyword_Echo:
+	case:
+		add_error(p, {tag = .Expected_Statement})
+		return
 	}
 
 	node = parse_simple_stmt(p) or_return
@@ -198,8 +211,9 @@ parse_if :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	if_token := expect(p, .Keyword_If) or_return
 	init, condition := parse_condition(p) or_return
 	then_branch := parse_block(p) or_return
+	else_branch := parse_else(p) or_return
 
-	if init == 0 && peek_tag(p) != .Keyword_Else {
+	if init == 0 && else_branch == 0 {
 		return add_node(
 				p,
 				{
@@ -210,8 +224,6 @@ parse_if :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 			),
 			true
 	}
-
-	else_branch := parse_else(p) or_return
 	extra := add_extra(p, If_While{init, then_branch, else_branch})
 	return add_node(
 			p,
@@ -250,6 +262,11 @@ parse_while :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 //
 // Returns 0 if there's no `else`.
 parse_else :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	// Else shouldn't allow braces on a new line.
+	if peek_tag(p) == .Newline && p.tokens[p.i + 1].tag == .Keyword_Else {
+		add_error(p, {tag = .Else_On_New_Line, token = Token_Index(p.i + 1)})
+		advance(p)
+	}
 	if peek_tag(p) != .Keyword_Else do return 0, true
 	advance(p)
 	if peek_tag(p) == .Keyword_If do return parse_if(p)
@@ -457,6 +474,8 @@ binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 	return .Root, 0
 }
 
+// Note: update FIRST(Expr) in `parse_stmt` with these.
+//
 // Unary <- UnaryOp Unary
 //        / KEYWORD_ECHO Expr
 //        / Postfix
@@ -603,10 +622,21 @@ expect_stmt_end :: proc(p: ^Parser) -> (ok: bool) {
 }
 
 synchronize :: proc(p: ^Parser) {
+	braces := 0
 	for peek_tag(p) != .EOF {
-		if peek_tag(p) == .Brace_Close do return
-		tag := p.tokens[advance(p)].tag
-		if tag == .Semi || tag == .Newline do return
+		#partial switch peek_tag(p) {
+		case .Brace_Open:
+			braces += 1
+		case .Brace_Close:
+			if braces == 0 do return
+			braces -= 1
+		case .Semi, .Newline:
+			if braces == 0 {
+				advance(p)
+				return
+			}
+		}
+		advance(p)
 	}
 }
 

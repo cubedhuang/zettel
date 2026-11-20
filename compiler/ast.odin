@@ -511,6 +511,7 @@ Error :: struct {
 
 Error_Tag :: enum u8 {
 	Expected_Expression,
+	Expected_Statement,
 	Expected_Token,
 	Expected_Stmt_End,
 	Invalid_Expression_List,
@@ -519,6 +520,7 @@ Error_Tag :: enum u8 {
 	Invalid_Label_Target,
 	Too_Many_Parameters,
 	Too_Many_Arguments,
+	Else_On_New_Line,
 }
 
 // Uses `context.temp_allocator`.
@@ -527,6 +529,8 @@ parse_error_message :: proc(ast: Ast, error: Error) -> string {
 	switch error.tag {
 	case .Expected_Expression:
 		return fmt.tprintf("expected expression, got %v", found)
+	case .Expected_Statement:
+		return fmt.tprintf("expected statement, got %v", found)
 	case .Expected_Token:
 		return fmt.tprintf("expected %v, got %v", token_names[error.expected], found)
 	case .Expected_Stmt_End:
@@ -543,6 +547,8 @@ parse_error_message :: proc(ast: Ast, error: Error) -> string {
 		return fmt.tprintf("more than %v parameters", common.MAX_PARAMETERS)
 	case .Too_Many_Arguments:
 		return fmt.tprintf("more than %v arguments", common.MAX_PARAMETERS)
+	case .Else_On_New_Line:
+		return "'else' must be on the same line as the '}' before it"
 	}
 	unreachable()
 }

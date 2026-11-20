@@ -20,6 +20,9 @@ disassemble :: proc(w: io.Writer, chunk: Chunk) {
 			case Constant_String:
 				fmt.wprintf(w, "\"%s\"", chunk.string_bytes[c.start:][:c.len], flush = false)
 			}
+		case .Jump, .Jump_If_False, .Jump_If_True:
+			jump := read_u16(chunk.code, offset + 1)
+			fmt.wprintf(w, " -> %v", offset + 3 + int(jump), flush = false)
 		}
 
 		io.write_byte(w, '\n')

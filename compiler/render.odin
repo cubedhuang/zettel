@@ -61,7 +61,9 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 	     .Less,
 	     .Less_Equal,
 	     .Greater,
-	     .Greater_Equal:
+	     .Greater_Equal,
+	     .And,
+	     .Or:
 		io.write_byte(w, '(')
 		io.write_string(w, token_text(ast, node.main_token))
 		io.write_byte(w, ' ')

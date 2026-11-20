@@ -25,7 +25,9 @@ Compile_Error :: struct {
 
 Compile_Error_Tag :: enum u8 {
 	None,
+	// TODO: get rid of these with dynamic constant widths
 	Too_Many_Constants,
+	Jump_Too_Large,
 }
 
 error_message :: proc {
@@ -40,6 +42,8 @@ compile_error_message :: proc(error: Compile_Error) -> string {
 		return ""
 	case .Too_Many_Constants:
 		return fmt.tprintf("more than %v constants", common.MAX_CONSTANTS)
+	case .Jump_Too_Large:
+		return fmt.tprintf("jump over more than %v bytes of code", max(u16))
 	}
 	unreachable()
 }
@@ -121,6 +125,12 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Not:
 		compile_expression(c, node.data.node)
 		emit(c, .Not, span)
+	case .And, .Or:
+		compile_expression(c, node.data.node_and_node.lhs)
+		jump := emit_jump(c, .Jump_If_False if node.tag == .And else .Jump_If_True, span)
+		emit(c, .Pop, span)
+		compile_expression(c, node.data.node_and_node.rhs)
+		patch_jump(c, jump, index)
 	case .Add, .Sub, .Mul, .Div, .Equal, .Not_Equal, .Less, .Less_Equal, .Greater, .Greater_Equal:
 		compile_expression(c, node.data.node_and_node.lhs)
 		compile_expression(c, node.data.node_and_node.rhs)
@@ -158,6 +168,25 @@ emit :: proc(c: ^Compiler, op: common.Op, span: common.Span) {
 emit_byte :: proc(c: ^Compiler, byte: u8, span: common.Span) {
 	append(&c.code, byte)
 	append(&c.spans, span)
+}
+
+// Returns the offset's location for `patch_jump`.
+emit_jump :: proc(c: ^Compiler, op: common.Op, span: common.Span) -> int {
+	emit(c, op, span)
+	emit_byte(c, 0xff, span)
+	emit_byte(c, 0xff, span)
+	return len(c.code) - 2
+}
+
+// Patches the jump at `location` point to the next instruction. `node` is the source of the jump.
+patch_jump :: proc(c: ^Compiler, location: int, node: Node_Index) {
+	jump := len(c.code) - (location + 2)
+	if jump > int(max(u16)) {
+		if c.error.tag == .None do c.error = {.Jump_Too_Large, node}
+		return
+	}
+	c.code[location] = u8(jump)
+	c.code[location + 1] = u8(jump >> 8)
 }
 
 // `node` is the source of the constant.

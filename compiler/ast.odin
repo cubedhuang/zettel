@@ -151,7 +151,9 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Less,
 		     .Less_Equal,
 		     .Greater,
-		     .Greater_Equal:
+		     .Greater_Equal,
+		     .And,
+		     .Or:
 			index = node.data.node_and_node.lhs
 		case .Assign_Multi, .Decl_Multi:
 			index = assign_targets(ast, index)[0]
@@ -197,7 +199,9 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Less,
 		     .Less_Equal,
 		     .Greater,
-		     .Greater_Equal:
+		     .Greater_Equal,
+		     .And,
+		     .Or:
 			index = node.data.node_and_node.rhs
 		case .Assign_Multi, .Decl_Multi:
 			values := assign_values(ast, index)
@@ -306,6 +310,10 @@ Node_Tag :: enum u8 {
 	Greater,
 	// `lhs >= rhs`
 	Greater_Equal,
+	// `lhs and rhs`
+	And,
+	// `lhs or rhs`
+	Or,
 }
 
 Node_Data :: struct #raw_union {

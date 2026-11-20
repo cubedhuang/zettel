@@ -4,7 +4,9 @@
         1 + 1
         (4 - 5) / -6
     }
-    (1 + "hi")
+    1 and 2
+    nil or false
+    false or 67
 }
 7
 "Hello" + " world"

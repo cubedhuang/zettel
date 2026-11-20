@@ -55,7 +55,7 @@ run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 			vm_push(vm, to_value(-operand))
 		case .Not:
 			operand := vm_pop(vm)
-			vm_push(vm, to_value(operand == NIL || operand == FALSE))
+			vm_push(vm, to_value(is_falsy(operand)))
 		case .Add:
 			rhs, lhs := vm_pop(vm), vm_pop(vm)
 			if a, b, ok := as_numbers(lhs, rhs); ok {
@@ -119,6 +119,16 @@ run :: proc(vm: ^Vm, program: Program) -> (error: Runtime_Error, ok: bool) {
 				return runtime_error(vm, chunk, start, "operands must be numbers")
 			}
 			vm_push(vm, to_value(lhs >= rhs))
+		case .Jump:
+			ip += 2 + int(common.read_u16(chunk.code, ip))
+		case .Jump_If_False:
+			jump := int(common.read_u16(chunk.code, ip))
+			ip += 2
+			if is_falsy(vm_peek(vm)) do ip += jump
+		case .Jump_If_True:
+			jump := int(common.read_u16(chunk.code, ip))
+			ip += 2
+			if !is_falsy(vm_peek(vm)) do ip += jump
 		case .Pop:
 			vm_pop(vm)
 		case .Print:
@@ -161,6 +171,10 @@ vm_push :: proc(vm: ^Vm, value: Value) {
 
 vm_pop :: proc(vm: ^Vm) -> Value {
 	return pop(&vm.stack)
+}
+
+vm_peek :: proc(vm: ^Vm) -> Value {
+	return vm.stack[len(vm.stack) - 1]
 }
 
 intern_take :: proc(vm: ^Vm, text: string) -> ^Obj_String {

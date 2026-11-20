@@ -249,32 +249,38 @@ parse_expression :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, 
 
 // PRECEDENCE:
 //
+// Or              or
+// And             and
 // Equality        == !=
 // Comparison      < <= > >=
 // Addition        + -
 // Multiplication  * /
 binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 	#partial switch tag {
+	case .Keyword_Or:
+		return .Or, 1
+	case .Keyword_And:
+		return .And, 2
 	case .Eq_Eq:
-		return .Equal, 1
+		return .Equal, 3
 	case .Bang_Eq:
-		return .Not_Equal, 1
+		return .Not_Equal, 3
 	case .Lt:
-		return .Less, 2
+		return .Less, 4
 	case .Lt_Eq:
-		return .Less_Equal, 2
+		return .Less_Equal, 4
 	case .Gt:
-		return .Greater, 2
+		return .Greater, 4
 	case .Gt_Eq:
-		return .Greater_Equal, 2
+		return .Greater_Equal, 4
 	case .Plus:
-		return .Add, 3
+		return .Add, 5
 	case .Minus:
-		return .Sub, 3
+		return .Sub, 5
 	case .Star:
-		return .Mul, 4
+		return .Mul, 6
 	case .Slash:
-		return .Div, 4
+		return .Div, 6
 	}
 	return .Root, 0
 }
@@ -310,7 +316,7 @@ parse_primary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	case .String:
 		return add_node(p, {tag = .String_Literal, main_token = advance(p)}), true
 	case .Keyword_Nil:
-		return add_node(p, {tag = .True_Literal, main_token = advance(p)}), true
+		return add_node(p, {tag = .Nil_Literal, main_token = advance(p)}), true
 	case .Keyword_True:
 		return add_node(p, {tag = .True_Literal, main_token = advance(p)}), true
 	case .Keyword_False:

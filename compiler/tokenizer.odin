@@ -34,6 +34,8 @@ Token_Tag :: enum u8 {
 	Keyword_Nil,
 	Keyword_True,
 	Keyword_False,
+	Keyword_Or,
+	Keyword_And,
 	Keyword_If,
 	Keyword_Else,
 	Keyword_While,
@@ -74,6 +76,8 @@ token_lexemes := #partial [Token_Tag]string {
 	.Keyword_Nil         = "nil",
 	.Keyword_True        = "true",
 	.Keyword_False       = "false",
+	.Keyword_Or          = "or",
+	.Keyword_And         = "and",
 	.Keyword_If          = "if",
 	.Keyword_Else        = "else",
 	.Keyword_While       = "while",
@@ -113,6 +117,8 @@ token_names := [Token_Tag]string {
 	.Keyword_Nil         = "'nil'",
 	.Keyword_True        = "'true'",
 	.Keyword_False       = "'false'",
+	.Keyword_Or          = "'or'",
+	.Keyword_And         = "'and'",
 	.Keyword_If          = "'if'",
 	.Keyword_Else        = "'else'",
 	.Keyword_While       = "'while'",
@@ -242,6 +248,10 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 			token.tag = .Keyword_True
 		case "false":
 			token.tag = .Keyword_False
+		case "or":
+			token.tag = .Keyword_Or
+		case "and":
+			token.tag = .Keyword_And
 		case "if":
 			token.tag = .Keyword_If
 		case "else":

@@ -163,3 +163,7 @@ values_equal :: #force_inline proc "contextless" (a, b: Value) -> bool {
 	}
 	return a == b
 }
+
+is_falsy :: proc(value: Value) -> bool {
+	return value == NIL || value == FALSE
+}

@@ -28,14 +28,21 @@ Constant_String :: struct {
 }
 
 Op :: enum u8 {
+	// Value
+	//
+	// Pushes one value onto the stack.
 	Constant,
 	Nil,
 	True,
 	False,
 	// Unary
+	//
+	// Pops one value from the stack.
 	Negate,
 	Not,
 	// Binary
+	//
+	// Pops two values from the stack.
 	Add,
 	Sub,
 	Mul,
@@ -46,6 +53,13 @@ Op :: enum u8 {
 	Less_Equal,
 	Greater,
 	Greater_Equal,
+	// Control flow
+	//
+	// Jumps offsets are from the end of the instruction (i.e. offset 1 means ip += 3).
+	// Leaves the condition on the stack.
+	Jump,
+	Jump_If_False,
+	Jump_If_True,
 	//
 	Pop,
 	Return,
@@ -54,7 +68,10 @@ Op :: enum u8 {
 }
 
 op_operand_size := #partial [Op]int {
-	.Constant = 2,
+	.Constant      = 2,
+	.Jump          = 2,
+	.Jump_If_False = 2,
+	.Jump_If_True  = 2,
 }
 
 MAX_CONSTANTS :: 1 << 16

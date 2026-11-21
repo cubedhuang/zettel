@@ -32,7 +32,7 @@ Diagnostic :: struct {
 }
 
 Style :: enum u8 {
-	/// Includes source and content around the span.
+	// Includes source and content around the span.
 	Rich,
 	// `path:line:col: severity: message`.
 	Short,
@@ -42,7 +42,7 @@ Options :: struct {
 	style:           Style,
 	// Lines above and below span.
 	context_lines:   int,
-	/// Summary line displayed after.
+	// The rest are counted in a summary line.
 	max_diagnostics: int,
 }
 

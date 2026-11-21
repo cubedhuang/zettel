@@ -11,22 +11,6 @@ Module :: struct {
 	string_bytes: []u8,
 }
 
-// Natives every class can use, like Go's universe scope. Statics and locals shadow them.
-Builtin :: enum u8 {
-	Print,
-}
-
-builtin_names := [Builtin]string {
-	.Print = "print",
-}
-
-// Names of a class's static variables.
-Static_Names :: struct {
-	bytes: []u8,
-	// The end of each name in `bytes`.
-	ends:  []u32,
-}
-
 Function :: struct {
 	// Index into `Module.string_bytes`.
 	name:          Constant_String,
@@ -61,108 +45,11 @@ Constant_String :: struct {
 	len:   u32,
 }
 
-Op :: enum u8 {
-	// Value
-	//
-	// Pushes one value onto the stack.
-	Constant,
-	Nil,
-	True,
-	False,
-	// Unary
-	//
-	// Pops one value from the stack.
-	Negate,
-	Not,
-	// Binary
-	//
-	// Pops two values from the stack.
-	Add,
-	Sub,
-	Mul,
-	Div,
-	Equal,
-	Not_Equal,
-	Less,
-	Less_Equal,
-	Greater,
-	Greater_Equal,
-	// Control flow
-	//
-	// Jumps offsets are from the end of the instruction (i.e. offset 1 means ip += 3).
-	// Leaves the condition on the stack.
-	Jump,
-	Jump_If_False,
-	Jump_If_True,
-	// Jumps backwards, also from the end of the instruction.
-	Loop,
-	// Variables
-	//
-	// Get pushes the variable's value and Set pops a value into the variable.
-	// Static indexes the class's statics and local indexes the stack.
-	Get_Static,
-	Set_Static,
-	Get_Local,
-	Set_Local,
-	// The operand is a `Builtin`.
-	Get_Builtin,
-	// The operand indexes the current closure's upvalues.
-	Get_Upvalue,
-	Set_Upvalue,
-	// Functions
-	//
-	// Pushes a new closure of a function that captures variables. The operand is the index of
-	// the function's constant, followed by a `Capture` for each of its upvalues.
-	Closure,
-	// Moves the local on top of the stack into the upvalues that captured it, then pops it.
-	Close_Upvalue,
-	// Calls the value below its arguments, which are on top of the stack. The operand is the
-	// argument count.
-	Call,
-	// Pops the return value and the frame, including the callee, then pushes the return value.
-	Return,
-	//
-	Pop,
-	// Writes the top value to the output without popping it.
-	Echo,
-	// Like `Echo`, but writes nothing for `nil`; used in the REPL.
-	Echo_Result,
-}
-
-op_operand_size := #partial [Op]int {
-	.Constant      = 2,
-	.Jump          = 2,
-	.Jump_If_False = 2,
-	.Jump_If_True  = 2,
-	.Loop          = 2,
-	.Get_Static    = 2,
-	.Set_Static    = 2,
-	.Get_Local     = 2,
-	.Set_Local     = 2,
-	.Get_Builtin   = 1,
-	.Get_Upvalue   = 1,
-	.Set_Upvalue   = 1,
-	// Not including the captures.
-	.Closure       = 2,
-	.Call          = 1,
-}
-
-MAX_CONSTANTS :: 1 << 16
-MAX_STATICS :: 1 << 16
-MAX_LOCALS :: 1 << 16
-MAX_PARAMETERS :: 255
-MAX_UPVALUES :: 256
-
-Capture :: struct {
-	// Whether `index` is a local of the enclosing function, rather than one of its upvalues.
-	is_local: bool,
-	index:    u16,
-}
-
-CAPTURE_SIZE :: 3
-
-read_capture :: proc(code: []u8, offset: int) -> Capture {
-	return {is_local = code[offset] != 0, index = read_u16(code, offset + 1)}
+// Names of a class's static variables.
+Static_Names :: struct {
+	bytes: []u8,
+	// The end of each name in `bytes`.
+	ends:  []u32,
 }
 
 module_destroy :: proc(module: ^Module) {
@@ -173,9 +60,23 @@ module_destroy :: proc(module: ^Module) {
 	delete(module.string_bytes)
 }
 
+chunk_destroy :: proc(chunk: ^Chunk) {
+	delete(chunk.code)
+	delete(chunk.spans)
+	delete(chunk.constants)
+}
+
 static_names_destroy :: proc(names: ^Static_Names) {
 	delete(names.bytes)
 	delete(names.ends)
+}
+
+constant_string :: proc(module: Module, s: Constant_String) -> string {
+	return string(module.string_bytes[s.start:][:s.len])
+}
+
+function_name :: proc(module: Module, function: Function) -> string {
+	return constant_string(module, function.name)
 }
 
 static_count :: proc(names: Static_Names) -> int {
@@ -185,22 +86,4 @@ static_count :: proc(names: Static_Names) -> int {
 static_name :: proc(names: Static_Names, slot: int) -> string {
 	start := names.ends[slot - 1] if slot > 0 else 0
 	return string(names.bytes[start:names.ends[slot]])
-}
-
-chunk_destroy :: proc(chunk: ^Chunk) {
-	delete(chunk.code)
-	delete(chunk.spans)
-	delete(chunk.constants)
-}
-
-read_u16 :: proc(code: []u8, offset: int) -> u16 {
-	return u16(code[offset]) | u16(code[offset + 1]) << 8
-}
-
-constant_string :: proc(module: Module, s: Constant_String) -> string {
-	return string(module.string_bytes[s.start:][:s.len])
-}
-
-function_name :: proc(module: Module, function: Function) -> string {
-	return constant_string(module, function.name)
 }

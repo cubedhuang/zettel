@@ -19,7 +19,7 @@ Compiler :: struct {
 	// Format like `common.Static_Names`.
 	static_bytes:        [dynamic]u8,
 	static_ends:         [dynamic]u32,
-	// Keys are from the source or preview Static_Names.
+	// Keys are from the source or the previous `Static_Names`.
 	static_slots:        map[string]int,
 	// Whether class-body code can use each static yet.
 	static_visible:      [dynamic]bool,
@@ -89,18 +89,13 @@ Target :: struct {
 Break :: struct {
 	// The jump's location for `patch_jump`.
 	location: int,
-	// Index into `Compiler.targets`.
+	// Index into `Chunk_Compiler.targets`.
 	target:   int,
 }
 
 Compile_Error :: struct {
 	tag:  Compile_Error_Tag,
 	node: Node_Index,
-}
-
-Name_Error :: struct {
-	tag:  Compile_Error_Tag,
-	name: string,
 }
 
 Compile_Error_Tag :: enum u8 {
@@ -138,92 +133,29 @@ Compile_Error_Tag :: enum u8 {
 	Assign_To_Builtin,
 }
 
-error_message :: proc {
-	parse_error_message,
-	compile_error_message,
+Name_Error :: struct {
+	tag:  Compile_Error_Tag,
+	name: string,
 }
 
-// Uses `context.temp_allocator`.
-compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
-	switch error.tag {
-	case .None:
-		return ""
-	case .Too_Many_Constants:
-		return fmt.tprintf("more than %v constants", common.MAX_CONSTANTS)
-	case .Jump_Too_Large:
-		return fmt.tprintf("jump over more than %v bytes of code", max(u16))
-	case .Too_Many_Statics:
-		return fmt.tprintf("more than %v static variables", common.MAX_STATICS)
-	case .Too_Many_Locals:
-		return fmt.tprintf("more than %v local variables", common.MAX_LOCALS)
-	case .Too_Many_Upvalues:
-		return fmt.tprintf("a function captures more than %v variables", common.MAX_UPVALUES)
-	case .Undeclared:
-		return fmt.tprintf(
-			"'%v' is not declared",
-			token_text(ast, ast.nodes[error.node].main_token),
-		)
-	case .Redeclared:
-		return fmt.tprintf(
-			"'%v' is already declared in this scope",
-			declared_name(ast, error.node),
-		)
-	case .Invalid_Assignment_Target:
-		return "can only assign to variables"
-	case .Too_Few_Values:
-		return "fewer values than targets"
-	case .Outside_Loop:
-		return fmt.tprintf(
-			"'%v' outside of a loop",
-			token_text(ast, ast.nodes[error.node].main_token),
-		)
-	case .Unknown_Label:
-		return fmt.tprintf(
-			"no enclosing statement is labeled '%v'",
-			token_text(ast, ast.nodes[error.node].data.token),
-		)
-	case .Continue_Not_Loop:
-		return fmt.tprintf(
-			"can't continue '%v' because it isn't a loop",
-			token_text(ast, ast.nodes[error.node].data.token),
-		)
-	case .Continue_From_Else:
-		return fmt.tprintf(
-			"can't continue '%v' from its else",
-			token_text(ast, ast.nodes[error.node].data.token),
-		)
-	case .Label_Shadowed:
-		return fmt.tprintf(
-			"label '%v' is already used by an enclosing statement",
-			token_text(ast, ast.nodes[error.node].main_token),
-		)
-	case .Return_Outside_Function:
-		return "'return' outside of a function"
-	case .Used_Before_Declaration:
-		return fmt.tprintf(
-			"'%v' is used before its declaration",
-			token_text(ast, ast.nodes[error.node].main_token),
-		)
-	case .Assign_To_Builtin:
-		return fmt.tprintf(
-			"can't assign to builtin '%v'",
-			token_text(ast, ast.nodes[error.node].main_token),
-		)
-	}
-	unreachable()
-}
-
-// The name declared by an `Identifier` or `Fn_Decl`.
-declared_name :: proc(ast: Ast, node: Node_Index) -> string {
-	token := ast.nodes[node].main_token
-	if ast.nodes[node].tag == .Fn_Decl do token += 1
-	return token_text(ast, token)
+// The instruction for each binary operator (except `And` and `Or`).
+binary_ops := #partial [Node_Tag]common.Op {
+	.Add           = .Add,
+	.Sub           = .Sub,
+	.Mul           = .Mul,
+	.Div           = .Div,
+	.Equal         = .Equal,
+	.Not_Equal     = .Not_Equal,
+	.Less          = .Less,
+	.Less_Equal    = .Less_Equal,
+	.Greater       = .Greater,
+	.Greater_Equal = .Greater_Equal,
 }
 
 // `statics` are the names of statics declared by earlier compilations of the same class, such as
 // previous REPL lines. They're copied into `module.statics` along with any new ones.
 //
-// `errors` are in source order and must be freed by the caller.
+// `errors` are in source order and must be freed by the caller. Uses `context.temp_allocator`.
 compile :: proc(
 	ast: Ast,
 	statics: common.Static_Names = {},
@@ -272,7 +204,7 @@ compile :: proc(
 		}
 		positioned := make([]Positioned, len(c.errors), context.temp_allocator)
 		for error, i in c.errors {
-			positioned[i] = {node_span(ast, error.node).main, error}
+			positioned[i] = {compile_error_span(ast, error).main, error}
 		}
 		slice.stable_sort_by(positioned, proc(a, b: Positioned) -> bool {
 			return a.position < b.position
@@ -357,156 +289,67 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 	}
 }
 
-compile_expression :: proc(c: ^Compiler, index: Node_Index) {
-	node := c.ast.nodes[index]
-	span := node_span(c.ast, index)
-	#partial switch node.tag {
-	case .Number_Literal:
-		// TODO: better numbers
-		value, _ := strconv.parse_f64(token_text(c.ast, node.main_token))
-		emit_constant(c, value, index)
-	case .String_Literal:
-		// TODO: better strings
-		value := add_string(c, token_text(c.ast, node.main_token))
-		emit_constant(c, value, index)
-	case .Nil_Literal:
-		emit(c, .Nil, span)
-	case .True_Literal:
-		emit(c, .True, span)
-	case .False_Literal:
-		emit(c, .False, span)
-	case .Identifier:
-		variable := resolve(c, index) or_break
-		switch variable.kind {
+compile_assign :: proc(c: ^Compiler, index: Node_Index) {
+	targets := assign_targets(c.ast, index)
+	valid := true
+	for target in targets {
+		if c.ast.nodes[target].tag != .Identifier {
+			fail(c, .Invalid_Assignment_Target, target)
+			valid = false
+		} else if variable, ok := resolve(c, target); !ok {
+			valid = false
+		} else if variable.kind == .Builtin {
+			fail(c, .Assign_To_Builtin, target)
+			valid = false
+		}
+	}
+
+	compile_values(c, index)
+	if !valid do return
+
+	// The last value is on top of the stack.
+	#reverse for target in targets {
+		variable, _ := resolve(c, target)
+		span := node_span(c.ast, target)
+		#partial switch variable.kind {
 		case .Static:
-			emit_variable(c, .Get_Static, variable, span)
+			emit_variable(c, .Set_Static, variable, span)
 		case .Local:
-			emit_variable(c, .Get_Local, variable, span)
+			emit_variable(c, .Set_Local, variable, span)
 		case .Upvalue:
-			emit(c, .Get_Upvalue, span)
-			emit_byte(c, u8(variable.slot), span)
-		case .Builtin:
-			emit(c, .Get_Builtin, span)
+			emit(c, .Set_Upvalue, span)
 			emit_byte(c, u8(variable.slot), span)
 		}
-	case .Grouped:
-		compile_expression(c, node.data.token_and_node.node)
-	case .Negate:
-		compile_expression(c, node.data.node)
-		emit(c, .Negate, span)
-	case .Not:
-		compile_expression(c, node.data.node)
-		emit(c, .Not, span)
-	case .Echo:
-		compile_expression(c, node.data.node)
-		emit(c, .Echo, span)
-	case .Call_One, .Call:
-		callee, args := call_parts(c.ast, index)
-		compile_expression(c, callee)
-		for arg in args do compile_expression(c, arg)
-		emit(c, .Call, span)
-		emit_byte(c, u8(len(args)), span)
-	case .And, .Or:
-		compile_expression(c, node.data.node_and_node.lhs)
-		jump := emit_jump(c, .Jump_If_False if node.tag == .And else .Jump_If_True, span)
-		emit(c, .Pop, span)
-		compile_expression(c, node.data.node_and_node.rhs)
-		patch_jump(c, jump, index)
-	case .Add, .Sub, .Mul, .Div, .Equal, .Not_Equal, .Less, .Less_Equal, .Greater, .Greater_Equal:
-		compile_expression(c, node.data.node_and_node.lhs)
-		compile_expression(c, node.data.node_and_node.rhs)
-		#partial switch node.tag {
-		case .Add:
-			emit(c, .Add, span)
-		case .Sub:
-			emit(c, .Sub, span)
-		case .Mul:
-			emit(c, .Mul, span)
-		case .Div:
-			emit(c, .Div, span)
-		case .Equal:
-			emit(c, .Equal, span)
-		case .Not_Equal:
-			emit(c, .Not_Equal, span)
-		case .Less:
-			emit(c, .Less, span)
-		case .Less_Equal:
-			emit(c, .Less_Equal, span)
-		case .Greater:
-			emit(c, .Greater, span)
-		case .Greater_Equal:
-			emit(c, .Greater_Equal, span)
-		}
-	case:
-		unreachable()
 	}
 }
 
-compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
-	name := declared_name(c.ast, index)
-	name_span := token_span(c.ast, c.ast.nodes[index].main_token + 1)
-	params, body := fn_parts(c.ast, index)
+compile_decl :: proc(c: ^Compiler, index: Node_Index) {
+	// do values first so shadowing is okay
+	compile_values(c, index)
+	targets := assign_targets(c.ast, index)
 
-	is_static := in_static_scope(c)
-	if !is_static do declare_local(c, name, index)
-
-	chunk := Chunk_Compiler {
-		enclosing = c.chunk,
-	}
-	c.chunk = &chunk
-	begin_scope(c)
-	for param in params {
-		declare_local(c, token_text(c.ast, c.ast.nodes[param].main_token), param)
-	}
-	for statement in block_statements(c.ast, body) {
-		compile_statement(c, statement)
-	}
-	end_span := token_span(c.ast, last_token(c.ast, body))
-	emit(c, .Nil, end_span)
-	emit(c, .Return, end_span)
-	c.chunk = chunk.enclosing
-
-	function_index := len(c.functions)
-	captures := chunk.upvalues[:]
-	defer delete(captures)
-	chunk.upvalues = {}
-	append(
-		&c.functions,
-		common.Function {
-			name = add_string_bytes(c, name),
-			arity = len(params),
-			upvalue_count = len(captures),
-			chunk = finish_chunk(&chunk),
-		},
-	)
-	// A local function's value lands in its slot.
-	constant := common.Constant_Function{u32(function_index)}
-	if len(captures) == 0 {
-		emit_constant(c, constant, index)
-	} else {
-		span := node_span(c.ast, index)
-		emit(c, .Closure, span)
-		emit_u16(c, add_constant(c, constant, index), span)
-		for capture in captures {
-			emit_byte(c, u8(capture.is_local), span)
-			emit_u16(c, int(capture.index), span)
+	if !in_static_scope(c) {
+		for target in targets {
+			declare_local(c, token_text(c.ast, c.ast.nodes[target].main_token), target)
 		}
+		return
 	}
-	if is_static {
-		emit_variable(c, .Set_Static, {.Static, c.static_slots[name]}, name_span)
+
+	for target in targets {
+		c.static_visible[c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]] = true
+	}
+	#reverse for target in targets {
+		slot := c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]
+		emit_variable(c, .Set_Static, {.Static, slot}, node_span(c.ast, target))
 	}
 }
 
-compile_return :: proc(c: ^Compiler, index: Node_Index) {
-	if c.chunk.enclosing == nil do fail(c, .Return_Outside_Function, index)
-	value := c.ast.nodes[index].data.node
-	span := node_span(c.ast, index)
-	if value != 0 {
-		compile_expression(c, value)
-	} else {
-		emit(c, .Nil, span)
-	}
-	emit(c, .Return, span)
+// Pushes the values of an assignment or declaration in order.
+compile_values :: proc(c: ^Compiler, index: Node_Index) {
+	values := assign_values(c.ast, index)
+	// TODO: allow fewer values once there are multiple returns
+	if len(values) < len(assign_targets(c.ast, index)) do fail(c, .Too_Few_Values, index)
+	for value in values do compile_expression(c, value)
 }
 
 compile_if :: proc(c: ^Compiler, index: Node_Index) {
@@ -626,6 +469,144 @@ compile_break :: proc(c: ^Compiler, index: Node_Index) {
 	}
 }
 
+compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
+	name := declared_name(c.ast, index)
+	name_span := token_span(c.ast, c.ast.nodes[index].main_token + 1)
+	params, body := fn_parts(c.ast, index)
+
+	is_static := in_static_scope(c)
+	if !is_static do declare_local(c, name, index)
+
+	chunk := Chunk_Compiler {
+		enclosing = c.chunk,
+	}
+	c.chunk = &chunk
+	begin_scope(c)
+	for param in params {
+		declare_local(c, token_text(c.ast, c.ast.nodes[param].main_token), param)
+	}
+	for statement in block_statements(c.ast, body) {
+		compile_statement(c, statement)
+	}
+	end_span := token_span(c.ast, last_token(c.ast, body))
+	emit(c, .Nil, end_span)
+	emit(c, .Return, end_span)
+	c.chunk = chunk.enclosing
+
+	// Nested functions were added while compiling the body, so this one goes after them.
+	constant := common.Constant_Function{u32(len(c.functions))}
+	upvalue_count := len(chunk.upvalues)
+	// A local function's value lands in its slot.
+	if upvalue_count == 0 {
+		emit_constant(c, constant, index)
+	} else {
+		span := node_span(c.ast, index)
+		emit(c, .Closure, span)
+		emit_u16(c, add_constant(c, constant, index), span)
+		for capture in chunk.upvalues do emit_capture(c, capture, span)
+	}
+	if is_static {
+		emit_variable(c, .Set_Static, {.Static, c.static_slots[name]}, name_span)
+	}
+
+	append(
+		&c.functions,
+		common.Function {
+			name = add_string_bytes(c, name),
+			arity = len(params),
+			upvalue_count = upvalue_count,
+			chunk = finish_chunk(&chunk),
+		},
+	)
+}
+
+compile_return :: proc(c: ^Compiler, index: Node_Index) {
+	if in_class_body(c) do fail(c, .Return_Outside_Function, index)
+	value := c.ast.nodes[index].data.node
+	span := node_span(c.ast, index)
+	if value != 0 {
+		compile_expression(c, value)
+	} else {
+		emit(c, .Nil, span)
+	}
+	emit(c, .Return, span)
+}
+
+compile_expression :: proc(c: ^Compiler, index: Node_Index) {
+	node := c.ast.nodes[index]
+	span := node_span(c.ast, index)
+	#partial switch node.tag {
+	case .Number_Literal:
+		// TODO: better numbers
+		value, _ := strconv.parse_f64(token_text(c.ast, node.main_token))
+		emit_constant(c, value, index)
+	case .String_Literal:
+		// TODO: better strings
+		value := add_string(c, token_text(c.ast, node.main_token))
+		emit_constant(c, value, index)
+	case .Nil_Literal:
+		emit(c, .Nil, span)
+	case .True_Literal:
+		emit(c, .True, span)
+	case .False_Literal:
+		emit(c, .False, span)
+	case .Identifier:
+		variable := resolve(c, index) or_break
+		switch variable.kind {
+		case .Static:
+			emit_variable(c, .Get_Static, variable, span)
+		case .Local:
+			emit_variable(c, .Get_Local, variable, span)
+		case .Upvalue:
+			emit(c, .Get_Upvalue, span)
+			emit_byte(c, u8(variable.slot), span)
+		case .Builtin:
+			emit(c, .Get_Builtin, span)
+			emit_byte(c, u8(variable.slot), span)
+		}
+	case .Grouped:
+		compile_expression(c, node.data.token_and_node.node)
+	case .Negate:
+		compile_expression(c, node.data.node)
+		emit(c, .Negate, span)
+	case .Not:
+		compile_expression(c, node.data.node)
+		emit(c, .Not, span)
+	case .Echo:
+		compile_expression(c, node.data.node)
+		emit(c, .Echo, span)
+	case .Call_One, .Call:
+		callee, args := call_parts(c.ast, index)
+		compile_expression(c, callee)
+		for arg in args do compile_expression(c, arg)
+		emit(c, .Call, span)
+		emit_byte(c, u8(len(args)), span)
+	case .And, .Or:
+		compile_expression(c, node.data.node_and_node.lhs)
+		jump := emit_jump(c, .Jump_If_False if node.tag == .And else .Jump_If_True, span)
+		emit(c, .Pop, span)
+		compile_expression(c, node.data.node_and_node.rhs)
+		patch_jump(c, jump, index)
+	case .Add, .Sub, .Mul, .Div, .Equal, .Not_Equal, .Less, .Less_Equal, .Greater, .Greater_Equal:
+		compile_expression(c, node.data.node_and_node.lhs)
+		compile_expression(c, node.data.node_and_node.rhs)
+		emit(c, binary_ops[node.tag], span)
+	case:
+		unreachable()
+	}
+}
+
+begin_scope :: proc(c: ^Compiler) {
+	c.chunk.depth += 1
+}
+
+end_scope :: proc(c: ^Compiler, span: common.Span) {
+	c.chunk.depth -= 1
+	for len(c.chunk.locals) > 0 && c.chunk.locals[len(c.chunk.locals) - 1].depth > c.chunk.depth {
+		emit_pop_local(c, pop(&c.chunk.locals), span)
+	}
+}
+
 // Returns the target's index.
 begin_target :: proc(c: ^Compiler, target: Target) -> int {
 	append(&c.chunk.targets, target)
@@ -648,82 +629,14 @@ end_target :: proc(c: ^Compiler, target: int, node: Node_Index) {
 	resize(&c.chunk.breaks, kept)
 }
 
-begin_scope :: proc(c: ^Compiler) {
-	c.chunk.depth += 1
+// Whether the current chunk is the class body rather than a function.
+in_class_body :: proc(c: ^Compiler) -> bool {
+	return c.chunk.enclosing == nil
 }
 
-end_scope :: proc(c: ^Compiler, span: common.Span) {
-	c.chunk.depth -= 1
-	for len(c.chunk.locals) > 0 && c.chunk.locals[len(c.chunk.locals) - 1].depth > c.chunk.depth {
-		emit_pop_local(c, pop(&c.chunk.locals), span)
-	}
-}
-
-compile_assign :: proc(c: ^Compiler, index: Node_Index) {
-	targets := assign_targets(c.ast, index)
-	valid := true
-	for target in targets {
-		if c.ast.nodes[target].tag != .Identifier {
-			fail(c, .Invalid_Assignment_Target, target)
-			valid = false
-		} else if variable, ok := resolve(c, target); !ok {
-			valid = false
-		} else if variable.kind == .Builtin {
-			fail(c, .Assign_To_Builtin, target)
-			valid = false
-		}
-	}
-
-	compile_values(c, index)
-	if !valid do return
-
-	// The last value is on top of the stack.
-	#reverse for target in targets {
-		variable, _ := resolve(c, target)
-		span := node_span(c.ast, target)
-		#partial switch variable.kind {
-		case .Static:
-			emit_variable(c, .Set_Static, variable, span)
-		case .Local:
-			emit_variable(c, .Set_Local, variable, span)
-		case .Upvalue:
-			emit(c, .Set_Upvalue, span)
-			emit_byte(c, u8(variable.slot), span)
-		}
-	}
-}
-
-compile_decl :: proc(c: ^Compiler, index: Node_Index) {
-	// do values first so shadowing is okay
-	compile_values(c, index)
-	targets := assign_targets(c.ast, index)
-
-	if !in_static_scope(c) {
-		for target in targets {
-			declare_local(c, token_text(c.ast, c.ast.nodes[target].main_token), target)
-		}
-		return
-	}
-
-	for target in targets {
-		c.static_visible[c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]] = true
-	}
-	#reverse for target in targets {
-		slot := c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]
-		emit_variable(c, .Set_Static, {.Static, slot}, node_span(c.ast, target))
-	}
-}
-
-// Pushes the values of an assignment or declaration in order.
-compile_values :: proc(c: ^Compiler, index: Node_Index) {
-	values := assign_values(c.ast, index)
-	// TODO: allow fewer values once there are multiple returns
-	if len(values) < len(assign_targets(c.ast, index)) do fail(c, .Too_Few_Values, index)
-	for value in values do compile_expression(c, value)
-}
-
+// Whether declarations make statics.
 in_static_scope :: proc(c: ^Compiler) -> bool {
-	return c.chunk.enclosing == nil && c.chunk.depth == 0
+	return in_class_body(c) && c.chunk.depth == 0
 }
 
 // `node` is the declaration's source for errors.
@@ -766,7 +679,7 @@ resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok
 		return {.Upvalue, index}, true
 	}
 	if slot, found := c.static_slots[name]; found {
-		if c.chunk.enclosing == nil && !c.static_visible[slot] {
+		if in_class_body(c) && !c.static_visible[slot] {
 			fail(c, .Used_Before_Declaration, identifier)
 			return
 		}
@@ -816,26 +729,6 @@ add_upvalue :: proc(
 	return len(chunk.upvalues) - 1
 }
 
-// Compilation continues after an error to find more
-//
-// Note: The module is discarded, so the code emitted afterwards doesn't need to make sense.
-fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index) {
-	#partial switch tag {
-	case .Too_Many_Constants,
-	     .Jump_Too_Large,
-	     .Too_Many_Statics,
-	     .Too_Many_Locals,
-	     .Too_Many_Upvalues:
-		if tag in c.reported_once do return
-		c.reported_once += {tag}
-	case .Undeclared, .Used_Before_Declaration:
-		key := Name_Error{tag, token_text(c.ast, c.ast.nodes[node].main_token)}
-		if key in c.reported_names do return
-		c.reported_names[key] = {}
-	}
-	append(&c.errors, Compile_Error{tag, node})
-}
-
 emit :: proc(c: ^Compiler, op: common.Op, span: common.Span) {
 	emit_byte(c, u8(op), span)
 }
@@ -846,8 +739,19 @@ emit_byte :: proc(c: ^Compiler, byte: u8, span: common.Span) {
 }
 
 emit_u16 :: proc(c: ^Compiler, value: int, span: common.Span) {
-	emit_byte(c, u8(value), span)
-	emit_byte(c, u8(value >> 8), span)
+	offset := emit_space(c, 2, span)
+	common.write_u16(c.chunk.code[:], offset, u16(value))
+}
+
+emit_capture :: proc(c: ^Compiler, capture: common.Capture, span: common.Span) {
+	offset := emit_space(c, common.CAPTURE_SIZE, span)
+	common.write_capture(c.chunk.code[:], offset, capture)
+}
+
+emit_space :: proc(c: ^Compiler, size: int, span: common.Span) -> int {
+	offset := len(c.chunk.code)
+	for _ in 0 ..< size do emit_byte(c, 0, span)
+	return offset
 }
 
 emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: common.Span) {
@@ -855,24 +759,12 @@ emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: com
 	emit_u16(c, variable.slot, span)
 }
 
-// Pops locals deeper than `depth` from the stack while keeping them declared.
-emit_pops_above :: proc(c: ^Compiler, depth: int, span: common.Span) {
-	#reverse for local in c.chunk.locals {
-		if local.depth <= depth do break
-		emit_pop_local(c, local, span)
-	}
-}
-
-emit_pop_local :: proc(c: ^Compiler, local: Local, span: common.Span) {
-	emit(c, .Close_Upvalue if local.captured else .Pop, span)
-}
-
-// Jumps back to `start`. `node` is the source of the jump.
-emit_loop :: proc(c: ^Compiler, start: int, span: common.Span, node: Node_Index) {
-	emit(c, .Loop, span)
-	jump := len(c.chunk.code) + 2 - start
-	if jump > int(max(u16)) do fail(c, .Jump_Too_Large, node)
-	emit_u16(c, jump, span)
+// `node` is the source of the constant.
+emit_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index) {
+	index := add_constant(c, constant, node)
+	span := node_span(c.ast, node)
+	emit(c, .Constant, span)
+	emit_u16(c, index, span)
 }
 
 // Returns the offset's location for `patch_jump`.
@@ -889,16 +781,27 @@ patch_jump :: proc(c: ^Compiler, location: int, node: Node_Index) {
 		fail(c, .Jump_Too_Large, node)
 		return
 	}
-	c.chunk.code[location] = u8(jump)
-	c.chunk.code[location + 1] = u8(jump >> 8)
+	common.write_u16(c.chunk.code[:], location, u16(jump))
 }
 
-// `node` is the source of the constant.
-emit_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index) {
-	index := add_constant(c, constant, node)
-	span := node_span(c.ast, node)
-	emit(c, .Constant, span)
-	emit_u16(c, index, span)
+// Jumps back to `start`. `node` is the source of the jump.
+emit_loop :: proc(c: ^Compiler, start: int, span: common.Span, node: Node_Index) {
+	emit(c, .Loop, span)
+	jump := len(c.chunk.code) + 2 - start
+	if jump > int(max(u16)) do fail(c, .Jump_Too_Large, node)
+	emit_u16(c, jump, span)
+}
+
+// Pops locals deeper than `depth` from the stack while keeping them declared.
+emit_pops_above :: proc(c: ^Compiler, depth: int, span: common.Span) {
+	#reverse for local in c.chunk.locals {
+		if local.depth <= depth do break
+		emit_pop_local(c, local, span)
+	}
+}
+
+emit_pop_local :: proc(c: ^Compiler, local: Local, span: common.Span) {
+	emit(c, .Close_Upvalue if local.captured else .Pop, span)
 }
 
 // Returns the constant's index in the chunk. `node` is the source of the constant.
@@ -935,4 +838,108 @@ add_string_bytes :: proc(c: ^Compiler, str: string) -> common.Constant_String {
 	c.string_locations[str] = value
 
 	return value
+}
+
+// Compilation continues after an error to find more
+//
+// Note: The module is discarded, so the code emitted afterwards doesn't need to make sense.
+fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index) {
+	#partial switch tag {
+	case .Too_Many_Constants,
+	     .Jump_Too_Large,
+	     .Too_Many_Statics,
+	     .Too_Many_Locals,
+	     .Too_Many_Upvalues:
+		if tag in c.reported_once do return
+		c.reported_once += {tag}
+	case .Undeclared, .Used_Before_Declaration:
+		key := Name_Error{tag, token_text(c.ast, c.ast.nodes[node].main_token)}
+		if key in c.reported_names do return
+		c.reported_names[key] = {}
+	}
+	append(&c.errors, Compile_Error{tag, node})
+}
+
+error_message :: proc {
+	parse_error_message,
+	compile_error_message,
+}
+
+error_span :: proc {
+	parse_error_span,
+	compile_error_span,
+}
+
+// Uses `context.temp_allocator`.
+compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
+	switch error.tag {
+	case .None:
+		return ""
+	case .Too_Many_Constants:
+		return fmt.tprintf("more than %v constants", common.MAX_CONSTANTS)
+	case .Jump_Too_Large:
+		return fmt.tprintf("jump over more than %v bytes of code", max(u16))
+	case .Too_Many_Statics:
+		return fmt.tprintf("more than %v static variables", common.MAX_STATICS)
+	case .Too_Many_Locals:
+		return fmt.tprintf("more than %v local variables", common.MAX_LOCALS)
+	case .Too_Many_Upvalues:
+		return fmt.tprintf("a function captures more than %v variables", common.MAX_UPVALUES)
+	case .Undeclared:
+		return fmt.tprintf(
+			"'%v' is not declared",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Redeclared:
+		return fmt.tprintf(
+			"'%v' is already declared in this scope",
+			declared_name(ast, error.node),
+		)
+	case .Invalid_Assignment_Target:
+		return "can only assign to variables"
+	case .Too_Few_Values:
+		return "fewer values than targets"
+	case .Outside_Loop:
+		return fmt.tprintf(
+			"'%v' outside of a loop",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Unknown_Label:
+		return fmt.tprintf(
+			"no enclosing statement is labeled '%v'",
+			token_text(ast, ast.nodes[error.node].data.token),
+		)
+	case .Continue_Not_Loop:
+		return fmt.tprintf(
+			"can't continue '%v' because it isn't a loop",
+			token_text(ast, ast.nodes[error.node].data.token),
+		)
+	case .Continue_From_Else:
+		return fmt.tprintf(
+			"can't continue '%v' from its else",
+			token_text(ast, ast.nodes[error.node].data.token),
+		)
+	case .Label_Shadowed:
+		return fmt.tprintf(
+			"label '%v' is already used by an enclosing statement",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Return_Outside_Function:
+		return "'return' outside of a function"
+	case .Used_Before_Declaration:
+		return fmt.tprintf(
+			"'%v' is used before its declaration",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Assign_To_Builtin:
+		return fmt.tprintf(
+			"can't assign to builtin '%v'",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	}
+	unreachable()
+}
+
+compile_error_span :: proc(ast: Ast, error: Compile_Error) -> common.Span {
+	return node_span(ast, error.node)
 }

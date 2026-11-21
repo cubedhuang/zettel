@@ -10,14 +10,15 @@ Span :: struct {
 	main:  u32,
 }
 
+// Owns its path and text.
 Source :: struct {
 	path:        string,
-	// Externally owned.
 	text:        string,
 	// Zero-indexed line to byte offset of its first character.
 	line_starts: []u32,
 }
 
+// Copies `path` and `text`.
 source_make :: proc(path: string, text: string) -> Source {
 	line_starts: [dynamic]u32
 	append(&line_starts, 0)
@@ -27,14 +28,9 @@ source_make :: proc(path: string, text: string) -> Source {
 			append(&line_starts, u32(i + 1))
 		}
 	}
-	return {path = path, text = text, line_starts = line_starts[:]}
+	return {path = strings.clone(path), text = strings.clone(text), line_starts = line_starts[:]}
 }
 
-source_destroy :: proc(source: ^Source) {
-	delete(source.line_starts)
-}
-
-// The copy owns its path and text. Free it with `source_clone_destroy`.
 source_clone :: proc(source: Source) -> Source {
 	return {
 		path = strings.clone(source.path),
@@ -43,10 +39,10 @@ source_clone :: proc(source: Source) -> Source {
 	}
 }
 
-source_clone_destroy :: proc(source: ^Source) {
+source_destroy :: proc(source: ^Source) {
 	delete(source.path)
 	delete(source.text)
-	source_destroy(source)
+	delete(source.line_starts)
 }
 
 line_count :: proc(source: ^Source) -> int {

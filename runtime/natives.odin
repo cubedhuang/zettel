@@ -5,6 +5,7 @@ import "core:io"
 
 VARIADIC :: -1
 
+// A non-empty `error` is a runtime error and may use `context.temp_allocator`.
 Native_Proc :: #type proc(vm: ^Vm, args: []Value) -> (result: Value, error: string)
 
 Native :: struct {

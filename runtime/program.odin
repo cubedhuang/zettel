@@ -30,10 +30,7 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Clo
 
 	class, found := vm.modules[source.path]
 	if !found {
-		class = new(Obj_Class)
-		class.tag = .Class
-		class.name = intern_clone(vm, filepath.short_stem(source.path))
-		track(vm, class)
+		class = new_class(vm, intern_clone(vm, filepath.short_stem(source.path)))
 		vm.modules[strings.clone(source.path)] = class
 	}
 	for len(class.statics) < common.static_count(module.statics) {
@@ -55,30 +52,6 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Clo
 	main := new_function(vm, class, nil, 0)
 	main.chunk = load_chunk(vm, source_index, module, functions, module.main)
 	return new_closure(vm, main)
-}
-
-new_closure :: proc(vm: ^Vm, function: ^Obj_Function) -> ^Obj_Closure {
-	closure := new(Obj_Closure)
-	closure.tag = .Closure
-	closure.function = function
-	closure.upvalues = make([]^Obj_Upvalue, function.upvalue_count)
-	track(vm, closure)
-	return closure
-}
-
-new_function :: proc(
-	vm: ^Vm,
-	class: ^Obj_Class,
-	name: ^Obj_String,
-	arity: int,
-) -> ^Obj_Function {
-	function := new(Obj_Function)
-	function.tag = .Function
-	function.name = name
-	function.arity = arity
-	function.class = class
-	track(vm, function)
-	return function
 }
 
 // `chunk` belongs to `module`, and `functions` are the loaded `module.functions`. `source` indexes

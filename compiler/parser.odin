@@ -11,12 +11,18 @@ Parser :: struct {
 	tokens:  #soa[]Token,
 	nodes:   #soa[dynamic]Node,
 	extra:   [dynamic]u32,
-	errors:  [dynamic]Error,
+	errors:  [dynamic]Parse_Error,
 	scratch: [dynamic]Node_Index,
 	// Index of next token in `tokens`.
 	i:       int,
 	// Used to skip newlines.
 	depth:   int,
+}
+
+// If there is only one expr, it shouldn't get a range.
+Exprs :: union {
+	Node_Index,
+	Node_Range,
 }
 
 parse :: proc(source: string) -> Ast {
@@ -370,12 +376,6 @@ parse_simple_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	return node, true
 }
 
-// If there is only one expr, it shouldn't get a range.
-Exprs :: union {
-	Node_Index,
-	Node_Range,
-}
-
 // Exprs <- Expr (COMMA Expr)*
 parse_exprs :: proc(p: ^Parser) -> (exprs: Exprs, ok: bool) {
 	scratch_top := len(p.scratch)
@@ -659,7 +659,7 @@ make_range :: proc(p: ^Parser, items: []Node_Index) -> Node_Range {
 	return {Extra_Index(start), Extra_Index(len(p.extra))}
 }
 
-add_error :: proc(p: ^Parser, error: Error) {
+add_error :: proc(p: ^Parser, error: Parse_Error) {
 	error := error
 	if error.token == 0 {
 		error.token = Token_Index(p.i)

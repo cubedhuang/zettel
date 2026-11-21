@@ -28,16 +28,19 @@ Frame :: struct {
 	base:    int,
 }
 
+Runtime_Error :: struct {
+	// May use `context.temp_allocator`.
+	message: string,
+	span:    common.Span,
+	// Index into `Vm.sources`.
+	source:  int,
+}
+
 vm_init :: proc(vm: ^Vm, out: io.Writer) {
 	vm.out = out
 	for native, builtin in builtin_natives {
-		obj := new(Obj_Native)
-		obj.tag = .Native
-		obj.name = intern_clone(vm, common.builtin_names[builtin])
-		obj.arity = native.arity
-		obj.procedure = native.procedure
-		track(vm, obj)
-		vm.builtins[builtin] = to_value(obj)
+		name := intern_clone(vm, common.builtin_names[builtin])
+		vm.builtins[builtin] = to_value(new_native(vm, name, native))
 	}
 }
 
@@ -47,7 +50,7 @@ vm_destroy :: proc(vm: ^Vm) {
 	delete(vm.strings)
 	for path in vm.modules do delete(path)
 	delete(vm.modules)
-	for &source in vm.sources do common.source_clone_destroy(&source)
+	for &source in vm.sources do common.source_destroy(&source)
 	delete(vm.sources)
 
 	current := vm.objects
@@ -56,14 +59,6 @@ vm_destroy :: proc(vm: ^Vm) {
 		obj_free(current)
 		current = next
 	}
-}
-
-Runtime_Error :: struct {
-	// May use `context.temp_allocator`.
-	message: string,
-	span:    common.Span,
-	// Index into `Vm.sources`.
-	source:  int,
 }
 
 // Runs a class body from `load`.
@@ -291,6 +286,14 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 	}
 }
 
+runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runtime_Error, bool) {
+	// closures might still survive like in the REPL
+	close_upvalues(vm, 0)
+	clear(&vm.stack)
+	clear(&vm.frames)
+	return {message = message, span = chunk.spans[ip], source = chunk.source}, false
+}
+
 // Uses `context.temp_allocator`.
 arity_message :: proc(expected, got: int) -> string {
 	return fmt.tprintf(
@@ -311,11 +314,8 @@ capture_upvalue :: proc(vm: ^Vm, slot: int) -> ^Obj_Upvalue {
 	}
 	if current != nil && current.slot == slot do return current
 
-	upvalue := new(Obj_Upvalue)
-	upvalue.tag = .Upvalue
-	upvalue.slot = slot
+	upvalue := new_upvalue(vm, slot)
 	upvalue.next_open = current
-	track(vm, upvalue)
 	if previous == nil {
 		vm.open_upvalues = upvalue
 	} else {
@@ -333,14 +333,6 @@ close_upvalues :: proc(vm: ^Vm, first: int) {
 		vm.open_upvalues = upvalue.next_open
 		upvalue.next_open = nil
 	}
-}
-
-runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runtime_Error, bool) {
-	// closures might still survive like in the REPL
-	close_upvalues(vm, 0)
-	clear(&vm.stack)
-	clear(&vm.frames)
-	return {message = message, span = chunk.spans[ip], source = chunk.source}, false
 }
 
 pop_numbers :: proc(vm: ^Vm) -> (lhs, rhs: f64, ok: bool) {
@@ -373,32 +365,4 @@ vm_pop :: proc(vm: ^Vm) -> Value {
 
 vm_peek :: proc(vm: ^Vm) -> Value {
 	return vm.stack[len(vm.stack) - 1]
-}
-
-intern_take :: proc(vm: ^Vm, text: string) -> ^Obj_String {
-	if s, ok := vm.strings[text]; ok {
-		delete(text)
-		return s
-	}
-
-	s := new(Obj_String)
-	s.tag = .String
-	s.text = text
-	track(vm, s)
-	vm.strings[s.text] = s
-	return s
-}
-
-// Adds `obj` to the objects the `Vm` frees.
-track :: proc(vm: ^Vm, obj: ^Obj) {
-	obj.next = vm.objects
-	vm.objects = obj
-}
-
-intern_clone :: proc(vm: ^Vm, text: string) -> ^Obj_String {
-	if s, ok := vm.strings[text]; ok {
-		return s
-	}
-
-	return intern_take(vm, strings.clone(text))
 }

@@ -141,7 +141,7 @@ compile :: proc(
 	diagnostics := make([]report.Diagnostic, len(errors), context.temp_allocator)
 	for error, i in errors {
 		diagnostics[i] = {
-			span    = compiler.node_span(ast, error.node),
+			span    = compiler.error_span(ast, error),
 			message = compiler.error_message(ast, error),
 		}
 	}

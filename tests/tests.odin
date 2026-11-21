@@ -119,7 +119,7 @@ run :: proc(source: ^common.Source, out: io.Writer) -> (errors: [dynamic]Diagnos
 			append(
 				&errors,
 				Diagnostic {
-					line_of(source, compiler.node_span(ast, error.node)),
+					line_of(source, compiler.error_span(ast, error)),
 					compiler.error_message(ast, error),
 				},
 			)

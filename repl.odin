@@ -61,7 +61,7 @@ repl_evaluate :: proc(r: Reporter, state: ^Repl, text: string) {
 
 	execute(r, &source, &state.vm, module)
 
-	// steal the statics for next time
+	// keep the statics for the next line
 	common.static_names_destroy(&state.statics)
 	state.statics = module.statics
 	module.statics = {}

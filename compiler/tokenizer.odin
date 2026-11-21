@@ -242,7 +242,7 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	case '\n':
 		token.tag = .Newline
 
-	// TODO: floating point and whatnot. for now we just have integers
+	// TODO: add floating-point numbers and other formats. Only integers work now.
 	case '0' ..= '9':
 		token.tag = .Number
 

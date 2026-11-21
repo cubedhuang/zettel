@@ -23,7 +23,7 @@ chunk_destroy :: proc(chunk: ^Chunk) {
 // Returns the class body as a closure to `run`. `source` and `module` can be destroyed afterwards,
 // because the `Vm` keeps a copy of `source` for runtime errors.
 //
-// Loading a path that was loaded (e.g., for the REPL) before reuses its class.
+// If the path was loaded before (for example, in the REPL), this reuses its class.
 load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Closure {
 	append(&vm.sources, common.source_clone(source^))
 	source_index := len(vm.sources) - 1
@@ -37,7 +37,7 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Clo
 		append(&class.statics, UNDEFINED)
 	}
 
-	// Chunks can refer to any function, so they're all made before loading chunks.
+	// Chunks can refer to any function, so this makes all functions before it loads the chunks.
 	functions := make([]^Obj_Function, len(module.functions))
 	defer delete(functions)
 	for function, index in module.functions {

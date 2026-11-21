@@ -37,7 +37,7 @@ Obj_Function :: struct {
 	name:          ^Obj_String,
 	// Doesn't count a rest parameter.
 	arity:         int,
-	// Whether extra arguments are collected into an array for the last parameter.
+	// Whether the last parameter collects the remaining arguments into an array.
 	variadic:      bool,
 	upvalue_count: int,
 	chunk:         Chunk,
@@ -74,7 +74,7 @@ Obj_Native :: struct {
 	name:      ^Obj_String,
 	// The minimum argument count when variadic.
 	arity:     int,
-	// Whether it takes any number of arguments after `arity`. They aren't collected into an array.
+	// Whether it takes any number of arguments after `arity`. It gets them as separate arguments.
 	variadic:  bool,
 	procedure: Native_Proc,
 }

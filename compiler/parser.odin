@@ -3,23 +3,22 @@ package compiler
 import "../common"
 import "core:strings"
 
-// `Parser` holds intermediate parsing data. After parsing, it's converted into
-// an `Ast`.
+// `Parser` holds the data used during parsing. After parsing, it becomes an `Ast`.
 Parser :: struct {
-	// Externally owned.
+	// The caller owns it.
 	source:  string,
 	tokens:  #soa[]Token,
 	nodes:   #soa[dynamic]Node,
 	extra:   [dynamic]u32,
 	errors:  [dynamic]Parse_Error,
 	scratch: [dynamic]Node_Index,
-	// Index of next token in `tokens`.
+	// Index of the next token in `tokens`.
 	i:       int,
-	// Used to skip newlines.
+	// Newlines are skipped while this is above 0.
 	depth:   int,
 }
 
-// If there is only one expr, it shouldn't get a range.
+// A single expression is a `Node_Index`, not a `Node_Range`.
 Exprs :: union {
 	Node_Index,
 	Node_Range,
@@ -295,7 +294,7 @@ parse_while :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 //
 // Returns 0 if there's no `else`.
 parse_else :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
-	// Else shouldn't allow braces on a new line.
+	// `else` must be on the same line as the `}` before it.
 	if peek_tag(p) == .Newline && p.tokens[p.i + 1].tag == .Keyword_Else {
 		add_error(p, {tag = .Else_On_New_Line, token = Token_Index(p.i + 1)})
 		advance(p)
@@ -501,7 +500,7 @@ binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 	return .Root, 0
 }
 
-// Note: update FIRST(Expr) in `parse_stmt` with these.
+// When you change these, also change FIRST(Expr) in `parse_stmt`.
 //
 // Unary <- UnaryOp Unary
 //        / KEYWORD_ECHO Expr
@@ -587,7 +586,7 @@ parse_call :: proc(p: ^Parser, callee: Node_Index) -> (node: Node_Index, ok: boo
 //
 // Item <- DOT_DOT? Expr
 //
-// Appends the items to `p.scratch`. Newlines are skipped until `close`, which isn't consumed.
+// Appends the items to `p.scratch`. Skips newlines until `close`. Does not consume `close`.
 parse_expr_list :: proc(p: ^Parser, close: Token_Tag) -> (ok: bool) {
 	p.depth += 1
 	defer p.depth -= 1

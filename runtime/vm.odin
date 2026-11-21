@@ -15,7 +15,7 @@ Vm :: struct {
 	frames:        [dynamic]Frame,
 	objects:       ^Obj,
 	strings:       map[string]^Obj_String,
-	// path --> root class. Keys are owned.
+	// Maps a path to its root class. The map owns the keys.
 	modules:       map[string]^Obj_Class,
 	builtins:      [common.Builtin]Value,
 	open_upvalues: ^Obj_Upvalue,
@@ -25,7 +25,7 @@ Vm :: struct {
 
 Frame :: struct {
 	closure: ^Obj_Closure,
-	// Only up to date at calls.
+	// Correct only during a call.
 	ip:      int,
 	// Stack index of the frame's first local. The callee is right below it.
 	base:    int,
@@ -322,7 +322,7 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 }
 
 runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runtime_Error, bool) {
-	// closures might still survive like in the REPL
+	// closures can stay alive after the error, for example in the REPL
 	close_upvalues(vm, 0)
 	clear(&vm.stack)
 	clear(&vm.frames)
@@ -404,7 +404,7 @@ pop_array :: proc(vm: ^Vm, count: int) -> ^Obj_Array {
 	return new_array(vm, items)
 }
 
-// Returns the open upvalue for the stack slot or creates if needed.
+// Returns the open upvalue for the stack slot. Creates it if it does not exist.
 capture_upvalue :: proc(vm: ^Vm, slot: int) -> ^Obj_Upvalue {
 	previous: ^Obj_Upvalue
 	current := vm.open_upvalues

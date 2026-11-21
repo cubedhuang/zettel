@@ -7,7 +7,7 @@ import "core:strings"
 
 // Design inspired by Zig's https://codeberg.org/ziglang/zig/src/branch/master/lib/std/zig/Ast.zig
 Ast :: struct {
-	// Externally owned.
+	// The caller owns it.
 	source: string,
 	tokens: #soa[]Token,
 	nodes:  #soa[]Node,
@@ -29,7 +29,7 @@ Node :: struct {
 }
 
 Node_Tag :: enum u8 {
-	// Guaranteed to be at index 0 of the node list.
+	// Always at index 0 of the node list.
 	//
 	// The `data` field is an `extra_range` of statements.
 	//
@@ -255,7 +255,7 @@ If_While :: struct {
 Parse_Error :: struct {
 	tag:            Parse_Error_Tag,
 	token:          Token_Index,
-	// Only used for `Expected_Token`.
+	// Only `Expected_Token` uses this.
 	expected:       Token_Tag,
 	// Set when `token` is on a later line than the unfinished code before it.
 	// The error is then reported at the end of `previous`.
@@ -367,7 +367,10 @@ call_parts :: proc(ast: Ast, index: Node_Index) -> (callee: Node_Index, args: []
 }
 
 array_elements :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
-	assert(ast.nodes[index].tag == .Array_Literal, "tag of array_elements node must be Array_Literal")
+	assert(
+		ast.nodes[index].tag == .Array_Literal,
+		"tag of array_elements node must be Array_Literal",
+	)
 	return extra_data_slice(ast, ast.nodes[index].data.extra_range, Node_Index)
 }
 

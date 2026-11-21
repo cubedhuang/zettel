@@ -36,17 +36,18 @@ Op :: enum u8 {
 	Greater_Equal,
 	// Control flow
 	//
-	// Jumps offsets are from the end of the instruction (i.e. offset 1 means ip += 3).
-	// Leaves the condition on the stack.
+	// Jump offsets start at the end of the instruction. For example, offset 1 means ip += 3.
+	// Conditional jumps leave the condition on the stack.
 	Jump,
 	Jump_If_False,
 	Jump_If_True,
-	// Jumps backwards, also from the end of the instruction.
+	// Jumps backward. The offset also starts at the end of the instruction.
 	Loop,
 	// Variables
 	//
-	// Get pushes the variable's value and Set pops a value into the variable.
-	// Static indexes the class's statics and local indexes the stack.
+	// `Get_*` pushes the value of the variable. `Set_*` pops a value into the variable.
+	// The operand of `*_Static` indexes the statics of the class. The operand of `*_Local`
+	// indexes the stack.
 	Get_Static,
 	Set_Static,
 	Get_Local,
@@ -87,7 +88,7 @@ Op :: enum u8 {
 	Echo_Results,
 	// Writes the top value to the output without popping it.
 	Echo,
-	// Like `Echo`, but writes nothing for `nil`; used in the REPL.
+	// Like `Echo`, but writes nothing for `nil`. The REPL uses it.
 	Echo_Result,
 }
 
@@ -105,15 +106,15 @@ op_operand_size := #partial [Op]int {
 	.Get_Builtin   = 1,
 	.Get_Upvalue   = 1,
 	.Set_Upvalue   = 1,
-	// Not including the captures.
+	// Does not include the captures.
 	.Closure       = 2,
 	.Call          = 2,
 	.Call_Spread   = 1,
 	.Return        = 1,
 }
 
-// For the expected result count of `Call` and `Call_Spread` and the count of `Return`: any number
-// of values, which the VM remembers until the next call returns.
+// As the expected result count of `Call` and `Call_Spread`, or as the count of `Return`, this means
+// any number of values. The VM remembers the count until the next call returns.
 ALL_RESULTS :: 255
 
 Capture :: struct {

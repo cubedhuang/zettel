@@ -1,4 +1,4 @@
-// The compiler package is responsible for taking source code and converting it into a `common.Module` which may then be loaded into a `Vm`.
+// The compiler package converts source code into a `common.Module`, which a `Vm` can then load.
 package compiler
 
 import "../common"
@@ -6,33 +6,33 @@ import "core:fmt"
 import "core:slice"
 import "core:strconv"
 
-// `Compiler` contains intermediate compilation data about a module. After compilation,
-// it's converted into a `common.Module`.
+// `Compiler` holds the data used during the compilation of a module. After compilation, it
+// becomes a `common.Module`.
 Compiler :: struct {
 	ast:                 Ast,
 	chunk:               ^Chunk_Compiler,
 	functions:           [dynamic]common.Function,
 	string_bytes:        [dynamic]u8,
-	// Keys are from the source.
+	// The keys are slices of the source.
 	string_locations:    map[string]common.Constant_String,
 
-	// Format like `common.Static_Names`.
+	// Same format as `common.Static_Names`.
 	static_bytes:        [dynamic]u8,
 	static_ends:         [dynamic]u32,
-	// Keys are from the source or the previous `Static_Names`.
+	// The keys are slices of the source or of the previous `Static_Names`.
 	static_slots:        map[string]int,
 	// Whether class-body code can use each static yet.
 	static_visible:      [dynamic]bool,
-	// We want to be able to declare things multiple times in the REPL.
+	// Lets the REPL declare a name more than once.
 	allow_redeclaration: bool,
 	// Whether top-level expression statements are echoed, like in the REPL.
 	echo_statements:     bool,
 
 	// Errors
 	errors:              [dynamic]Compile_Error,
-	// Only report some errors once.
+	// Error tags that are reported only once.
 	reported_once:       bit_set[Compile_Error_Tag],
-	// Only report errors for any name once.
+	// Names that already have an error. Each name gets one error.
 	reported_names:      map[Name_Error]struct{},
 }
 
@@ -69,7 +69,7 @@ Variable :: struct {
 		Upvalue,
 		Builtin,
 	},
-	// static_slots, locals, upvalues, or builtin index
+	// Index into `static_slots`, `locals`, `upvalues`, or the builtins
 	slot: int,
 }
 
@@ -157,7 +157,7 @@ binary_ops := #partial [Node_Tag]common.Op {
 // `statics` are the names of statics declared by earlier compilations of the same class, such as
 // previous REPL lines. They're copied into `module.statics` along with any new ones.
 //
-// `errors` are in source order and must be freed by the caller. Uses `context.temp_allocator`.
+// `errors` are in source order. The caller must free them. Uses `context.temp_allocator`.
 compile :: proc(
 	ast: Ast,
 	statics: common.Static_Names = {},
@@ -318,8 +318,8 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 	compile_values(c, index)
 	if !valid do return
 
-	// The last value is on top of the stack, so targets are assigned from right to left. An index
-	// target's operands are evaluated just before it's assigned.
+	// The last value is on top of the stack, so this assigns the targets from right to left. It
+	// evaluates the operands of an index target just before it assigns to that target.
 	#reverse for target in targets {
 		span := node_span(c.ast, target)
 		if c.ast.nodes[target].tag == .Index {
@@ -342,7 +342,7 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 }
 
 compile_decl :: proc(c: ^Compiler, index: Node_Index) {
-	// do values first so shadowing is okay
+	// compile the values first so a declaration can shadow a name that its values use
 	compile_values(c, index)
 	targets := assign_targets(c.ast, index)
 
@@ -417,7 +417,7 @@ compile_while :: proc(c: ^Compiler, index: Node_Index, label := "") {
 	exit := emit_jump(c, .Jump_If_False, span)
 	emit(c, .Pop, span)
 	compile_statement(c, body)
-	// Initializer locals are popped each iteration.
+	// Each iteration pops the initializer's locals.
 	emit_pops_above(c, c.chunk.targets[target].depth, span)
 	emit_loop(c, c.chunk.targets[target].start, span, index)
 
@@ -656,8 +656,8 @@ compile_call :: proc(c: ^Compiler, index: Node_Index, results: int) {
 	emit_byte(c, u8(results), span)
 }
 
-// Pushes the arguments or elements in `items`. If any is a `Spread`, they're collected into one
-// array instead, and `spread` is true. `span` is the list's source.
+// Pushes the arguments or elements in `items`. If any item is a `Spread`, this collects them all
+// into one array instead, and `spread` is true. `span` is the list's source.
 compile_list :: proc(c: ^Compiler, items: []Node_Index, span: common.Span) -> (spread: bool) {
 	first_spread := -1
 	for item, i in items {
@@ -864,7 +864,8 @@ emit_jump :: proc(c: ^Compiler, op: common.Op, span: common.Span) -> int {
 	return len(c.chunk.code) - 2
 }
 
-// Patches the jump at `location` point to the next instruction. `node` is the source of the jump.
+// Patches the jump at `location` to point to the next instruction. `node` is the source of the
+// jump.
 patch_jump :: proc(c: ^Compiler, location: int, node: Node_Index) {
 	jump := len(c.chunk.code) - (location + 2)
 	if jump > int(max(u16)) {
@@ -930,9 +931,9 @@ add_string_bytes :: proc(c: ^Compiler, str: string) -> common.Constant_String {
 	return value
 }
 
-// Compilation continues after an error to find more
+// Compilation continues after an error to find more errors.
 //
-// Note: The module is discarded, so the code emitted afterwards doesn't need to make sense.
+// The caller discards the module, so the code emitted after an error does not need to make sense.
 fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index) {
 	#partial switch tag {
 	case .Too_Many_Constants,

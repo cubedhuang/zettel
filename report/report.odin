@@ -40,9 +40,9 @@ Style :: enum u8 {
 
 Options :: struct {
 	style:           Style,
-	// Lines above and below span.
+	// Number of lines to show above and below the span.
 	context_lines:   int,
-	// The rest are counted in a summary line.
+	// A summary line counts the diagnostics after this limit.
 	max_diagnostics: int,
 }
 

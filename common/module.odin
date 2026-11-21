@@ -1,8 +1,8 @@
-// The common package contains data structures shared between the compiler and runtime, including
-// the bytecode format and debugging information like `Span`s.
+// The common package holds the data that the compiler and the runtime share: the bytecode format
+// and debug data such as `Span`s.
 package common
 
-// A module is the compiled form of a file, which is the body of a class.
+// A module is a compiled file. A file is the body of a class.
 Module :: struct {
 	main:         Chunk,
 	functions:    []Function,

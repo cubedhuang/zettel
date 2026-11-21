@@ -1,0 +1,21 @@
+fn make() {
+    class Inner {} // error: a class can only be declared directly in a class body
+    return Inner
+}
+if true {
+    constructor init(self) {} // error: a constructor can only be declared directly in a class body
+}
+class Point {
+    constructor init(self) {
+        return self // error: a constructor can't return a value, because it returns the new instance
+    }
+}
+class Twice {} // note: 'Twice' was first declared here
+class Twice {} // error: 'Twice' is already declared in this scope
+class Early {
+    x := Later // error: 'Later' is used before its declaration
+}
+class Later { // note: 'Later' is declared here
+    y := z // error: 'z' is used before its declaration
+    z := 1 // note: 'z' is declared here
+}

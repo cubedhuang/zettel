@@ -1,0 +1,5 @@
+class Point {
+    constructor init(self) {}
+    fn move(self) {}
+}
+f := Point.init().move // error: can't get method 'move' of Point without calling it

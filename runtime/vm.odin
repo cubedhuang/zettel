@@ -24,13 +24,15 @@ Vm :: struct {
 }
 
 Frame :: struct {
-	closure: ^Obj_Closure,
+	closure:  ^Obj_Closure,
 	// Correct only during a call.
-	ip:      int,
+	ip:       int,
 	// Stack index of the frame's first local. The callee is right below it.
-	base:    int,
+	base:     int,
 	// How many values the caller expects, or `common.ALL_RESULTS`.
-	results: int,
+	results:  int,
+	// The instance that a constructor is making, which it returns. nil for other functions.
+	instance: ^Obj_Instance,
 }
 
 Runtime_Error :: struct {
@@ -257,13 +259,23 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 		case .Get_Static:
 			value := statics[common.read_u16(chunk.code, ip)]
 			ip += 2
-			if value == UNDEFINED {
-				return runtime_error(vm, chunk, start, "variable used before it was defined")
-			}
+			if value == UNDEFINED do return runtime_error(vm, chunk, start, UNDEFINED_ERROR)
 			vm_push(vm, value)
 		case .Set_Static:
 			statics[common.read_u16(chunk.code, ip)] = vm_pop(vm)
 			ip += 2
+		case .Get_Outer_Static, .Set_Outer_Static:
+			class := vm.frames[len(vm.frames) - 1].closure.function.class
+			for _ in 0 ..< chunk.code[ip] do class = class.outer
+			slot := common.read_u16(chunk.code, ip + 1)
+			ip += 3
+			if op == .Set_Outer_Static {
+				class.statics[slot] = vm_pop(vm)
+				break
+			}
+			value := class.statics[slot]
+			if value == UNDEFINED do return runtime_error(vm, chunk, start, UNDEFINED_ERROR)
+			vm_push(vm, value)
 		case .Get_Builtin:
 			vm_push(vm, vm.builtins[common.Builtin(chunk.code[ip])])
 			ip += 1
@@ -300,15 +312,39 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			array, index, message := array_index(indexed, index_value)
 			if message != "" do return runtime_error(vm, chunk, start, message)
 			array.items[index] = item
+		case .Get_Property, .Get_Property_Keep:
+			name := (^Obj_String)(to_obj(chunk.constants[common.read_u16(chunk.code, ip)]))
+			ip += 2
+			object := vm_peek(vm) if op == .Get_Property_Keep else vm_pop(vm)
+			value, message := get_property(object, name)
+			if message != "" do return runtime_error(vm, chunk, start, message)
+			vm_push(vm, value)
+		case .Set_Property, .Update_Property:
+			name := (^Obj_String)(to_obj(chunk.constants[common.read_u16(chunk.code, ip)]))
+			ip += 2
+			object, value: Value
+			if op == .Set_Property {
+				object, value = vm_pop(vm), vm_pop(vm)
+			} else {
+				value, object = vm_pop(vm), vm_pop(vm)
+			}
+			if message := set_property(object, name, value); message != "" {
+				return runtime_error(vm, chunk, start, message)
+			}
 		case .Get_Local:
 			vm_push(vm, vm.stack[base + int(common.read_u16(chunk.code, ip))])
 			ip += 2
 		case .Set_Local:
 			vm.stack[base + int(common.read_u16(chunk.code, ip))] = vm_pop(vm)
 			ip += 2
-		case .Call, .Call_Spread:
+		case .Call, .Call_Spread, .Invoke, .Invoke_Spread:
+			name: ^Obj_String
+			if op == .Invoke || op == .Invoke_Spread {
+				name = (^Obj_String)(to_obj(chunk.constants[common.read_u16(chunk.code, ip)]))
+				ip += 2
+			}
 			arg_count: int
-			if op == .Call {
+			if op == .Call || op == .Invoke {
 				arg_count = int(chunk.code[ip])
 				ip += 1
 				if arg_count == common.ALL_RESULTS do arg_count = vm.result_count
@@ -320,6 +356,11 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			}
 			results := int(chunk.code[ip])
 			ip += 1
+			if name != nil {
+				message: string
+				arg_count, message = prepare_invoke(vm, name, arg_count)
+				if message != "" do return runtime_error(vm, chunk, start, message)
+			}
 
 			vm.frames[len(vm.frames) - 1].ip = ip
 			if message := call_value(vm, arg_count, results); message != "" {
@@ -354,6 +395,11 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			if count == common.ALL_RESULTS do count = vm.result_count
 			finished := pop(&vm.frames)
 			close_upvalues(vm, finished.base)
+			if finished.instance != nil {
+				// the compiler made sure the constructor returned only nil
+				finished.instance.sealed = true
+				vm.stack[len(vm.stack) - 1] = to_value(finished.instance)
+			}
 			if len(vm.frames) == 0 {
 				resize(&vm.stack, finished.base)
 				return {}, true
@@ -433,13 +479,68 @@ call_value :: proc(vm: ^Vm, arg_count: int, results: int) -> (error: string) {
 			return arity_message(function.arity, function.variadic, arg_count)
 		}
 		if len(vm.frames) >= MAX_FRAMES do return "stack overflow"
+		instance: ^Obj_Instance
+		if function.kind == .Constructor {
+			// the new instance is the first parameter
+			instance = new_instance(vm, function.class)
+			inject_at(&vm.stack, callee_slot + 1, to_value(instance))
+		}
 		if function.variadic {
 			vm_push(vm, to_value(pop_array(vm, arg_count - function.arity)))
 		}
-		append(&vm.frames, Frame{closure = closure, base = callee_slot + 1, results = results})
+		append(
+			&vm.frames,
+			Frame {
+				closure = closure,
+				base = callee_slot + 1,
+				results = results,
+				instance = instance,
+			},
+		)
 		return ""
 	}
 	return "can only call functions"
+}
+
+// For `Invoke`, replaces the receiver below the top `arg_count` values with the function to call.
+// A method also gets the receiver as its first argument, which `new_count` includes.
+prepare_invoke :: proc(
+	vm: ^Vm,
+	name: ^Obj_String,
+	arg_count: int,
+) -> (
+	new_count: int,
+	error: string,
+) {
+	receiver_slot := len(vm.stack) - arg_count - 1
+	if obj, is_obj := as_obj(vm.stack[receiver_slot]); is_obj {
+		#partial switch obj.tag {
+		case .Instance:
+			instance := (^Obj_Instance)(obj)
+			if index := find_field(instance, name); index >= 0 {
+				vm.stack[receiver_slot] = instance.fields[index]
+				return arg_count, ""
+			}
+			slot, found := instance.class.slots[name]
+			if !found {
+				return 0, fmt.tprintf(
+					"%v has no field or method '%v'",
+					instance.class.name.text,
+					name.text,
+				)
+			}
+			method := instance.class.statics[slot]
+			if method == UNDEFINED do return 0, UNDEFINED_ERROR
+			inject_at(&vm.stack, receiver_slot, method)
+			return arg_count + 1, ""
+		case .Class:
+			value, message := get_static((^Obj_Class)(obj), name)
+			if message != "" do return 0, message
+			vm.stack[receiver_slot] = value
+			return arg_count, ""
+		}
+	}
+	return 0, "only instances and classes have methods"
 }
 
 // Checks a call's return value count against what the caller expects, and remembers it when the
@@ -540,6 +641,87 @@ as_array :: proc(value: Value) -> (array: ^Obj_Array, ok: bool) {
 	obj := as_obj(value) or_return
 	if obj.tag != .Array do return nil, false
 	return (^Obj_Array)(obj), true
+}
+
+UNDEFINED_ERROR :: "variable used before it was defined"
+
+// An instance's properties are its fields, and a class's properties are its statics. A non-empty
+// `error` uses `context.temp_allocator`.
+get_property :: proc(object: Value, name: ^Obj_String) -> (value: Value, error: string) {
+	if obj, is_obj := as_obj(object); is_obj {
+		#partial switch obj.tag {
+		case .Instance:
+			instance := (^Obj_Instance)(obj)
+			if index := find_field(instance, name); index >= 0 {
+				return instance.fields[index], ""
+			}
+			if name in instance.class.slots {
+				return NIL, fmt.tprintf(
+					"can't get method '%v' of %v without calling it",
+					name.text,
+					instance.class.name.text,
+				)
+			}
+			return NIL, fmt.tprintf("%v has no field '%v'", instance.class.name.text, name.text)
+		case .Class:
+			return get_static((^Obj_Class)(obj), name)
+		}
+	}
+	return NIL, "only instances and classes have properties"
+}
+
+// Adds a field to an instance that's still being constructed. A non-empty `error` uses
+// `context.temp_allocator`.
+set_property :: proc(object: Value, name: ^Obj_String, value: Value) -> (error: string) {
+	if obj, is_obj := as_obj(object); is_obj {
+		#partial switch obj.tag {
+		case .Instance:
+			instance := (^Obj_Instance)(obj)
+			if index := find_field(instance, name); index >= 0 {
+				instance.fields[index] = value
+				return ""
+			}
+			// a method call looks at fields first, so the field would hide the static
+			if name in instance.class.slots {
+				return fmt.tprintf(
+					"a field named '%v' would hide the static '%v' of %v",
+					name.text,
+					name.text,
+					instance.class.name.text,
+				)
+			}
+			if instance.sealed {
+				return fmt.tprintf(
+					"%v has no field '%v', and fields can only be added by its constructor",
+					instance.class.name.text,
+					name.text,
+				)
+			}
+			add_field(instance, name, value)
+			return ""
+		case .Class:
+			class := (^Obj_Class)(obj)
+			slot, found := class.slots[name]
+			if !found do return static_message(class, name)
+			class.statics[slot] = value
+			return ""
+		}
+	}
+	return "only instances and classes have properties"
+}
+
+// A non-empty `error` uses `context.temp_allocator`.
+get_static :: proc(class: ^Obj_Class, name: ^Obj_String) -> (value: Value, error: string) {
+	slot, found := class.slots[name]
+	if !found do return NIL, static_message(class, name)
+	value = class.statics[slot]
+	if value == UNDEFINED do return NIL, UNDEFINED_ERROR
+	return value, ""
+}
+
+// Uses `context.temp_allocator`.
+static_message :: proc(class: ^Obj_Class, name: ^Obj_String) -> string {
+	return fmt.tprintf("class %v has no static '%v'", class.name.text, name.text)
 }
 
 BITWISE_ERROR :: "bitwise operands must be 32-bit integers"

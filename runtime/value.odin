@@ -109,12 +109,7 @@ is_falsy :: proc(value: Value) -> bool {
 	return value == NIL || value == FALSE
 }
 
-write_value :: proc(
-	w: io.Writer,
-	value: Value,
-	quote_strings := true,
-	writing: ^Writing_Array = nil,
-) {
+write_value :: proc(w: io.Writer, value: Value, quote_strings := true, writing: ^Writing = nil) {
 	switch {
 	case is_number(value):
 		write_number(w, to_number(value))

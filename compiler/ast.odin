@@ -111,6 +111,16 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `fn`, and the name is the token after it.
 	Fn_Decl,
+	// `constructor name(params) body`. Same layout as `Fn_Decl`. The first parameter is `self`.
+	//
+	// The `main_token` field is the `constructor`, and the name is the token after it.
+	Constructor_Decl,
+	// `class name body`.
+	//
+	// The `data` field is `node`, the `Block` of the class body.
+	//
+	// The `main_token` field is the `class`, and the name is the token after it.
+	Class_Decl,
 	// `return` or `return node`.
 	//
 	// The `data` field is `node`, the optional value.
@@ -191,6 +201,12 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `[`.
 	Index,
+	// `node.name`.
+	//
+	// The `data` field is `node`, the object.
+	//
+	// The `main_token` field is the name, after the `.`.
+	Property,
 	// `lhs + rhs`.
 	//
 	// For all binary operations, the `data` field is `node_and_node` with both operands.
@@ -300,6 +316,7 @@ Parse_Error_Tag :: enum u8 {
 	Too_Many_Arguments,
 	Too_Many_Elements,
 	Rest_Param_Not_Last,
+	Constructor_Without_Self,
 	Too_Many_Return_Values,
 	Compound_Assign_Multi,
 	Chained_Comparison,
@@ -353,10 +370,13 @@ assign_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
 	panic("tag of assign_values node must be assign or decl")
 }
 
-// For `Fn_Decl`. The name is the token after `main_token`.
+// For `Fn_Decl` and `Constructor_Decl`. The name is the token after `main_token`.
 fn_parts :: proc(ast: Ast, index: Node_Index) -> (params: []Node_Index, body: Node_Index) {
 	node := ast.nodes[index]
-	assert(node.tag == .Fn_Decl, "tag of fn_parts node must be Fn_Decl")
+	assert(
+		node.tag == .Fn_Decl || node.tag == .Constructor_Decl,
+		"tag of fn_parts node must be Fn_Decl or Constructor_Decl",
+	)
 	range := extra_data(ast, node.data.node_and_extra.extra, Node_Range)
 	return extra_data_slice(ast, range, Node_Index), node.data.node_and_extra.node
 }
@@ -374,7 +394,7 @@ return_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
 	panic("tag of return_values node must be a return")
 }
 
-// Whether a `Fn_Decl` ends with a `Rest_Param`.
+// Whether a `Fn_Decl` or `Constructor_Decl` ends with a `Rest_Param`.
 fn_is_variadic :: proc(ast: Ast, params: []Node_Index) -> bool {
 	return len(params) > 0 && ast.nodes[params[len(params) - 1]].tag == .Rest_Param
 }
@@ -420,10 +440,13 @@ if_while_parts :: proc(
 	panic("tag of if_while_parts node must be an if or while")
 }
 
-// The name declared by an `Identifier` or `Fn_Decl`.
+// The name declared by an `Identifier`, `Fn_Decl`, `Constructor_Decl`, or `Class_Decl`.
 declared_name :: proc(ast: Ast, node: Node_Index) -> string {
 	token := ast.nodes[node].main_token
-	if ast.nodes[node].tag == .Fn_Decl do token += 1
+	#partial switch ast.nodes[node].tag {
+	case .Fn_Decl, .Constructor_Decl, .Class_Decl:
+		token += 1
+	}
 	return token_text(ast, token)
 }
 
@@ -440,6 +463,19 @@ token_text :: proc(ast: Ast, index: Token_Index) -> string {
 	}
 	scan(&tokenizer)
 	return ast.source[start:tokenizer.offset]
+}
+
+// The source of the name that a declaration or label introduces. For a `fn`, `constructor`, or
+// `class`, this includes the keyword but points at the name.
+declaration_span :: proc(ast: Ast, index: Node_Index) -> common.Span {
+	node := ast.nodes[index]
+	#partial switch node.tag {
+	case .Fn_Decl, .Constructor_Decl, .Class_Decl:
+		return tokens_span(ast, node.main_token, node.main_token + 1, node.main_token + 1)
+	case .Labeled:
+		return token_span(ast, node.main_token)
+	}
+	return node_span(ast, index)
 }
 
 token_span :: proc(ast: Ast, index: Token_Index) -> common.Span {
@@ -497,6 +533,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Break,
 		     .Continue,
 		     .Fn_Decl,
+		     .Constructor_Decl,
+		     .Class_Decl,
 		     .Return,
 		     .Return_Multi,
 		     .Number_Literal,
@@ -545,6 +583,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			index = node.data.node_and_node.lhs
 		case .Call:
 			index = node.data.node_and_extra.node
+		case .Property:
+			index = node.data.node
 		}
 	}
 }
@@ -574,8 +614,10 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			index = node.data.node
 		case .Break, .Continue:
 			return node.data.token if node.data.token != 0 else node.main_token
-		case .Fn_Decl:
+		case .Fn_Decl, .Constructor_Decl:
 			index = node.data.node_and_extra.node
+		case .Class_Decl:
+			index = node.data.node
 		case .Return:
 			if node.data.node == 0 do return node.main_token
 			index = node.data.node
@@ -601,7 +643,8 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Nil_Literal,
 		     .True_Literal,
 		     .False_Literal,
-		     .Identifier:
+		     .Identifier,
+		     .Property:
 			return node.main_token
 		case .Grouped:
 			return node.data.token_and_node.token
@@ -680,6 +723,8 @@ parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 		return fmt.tprintf("more than %v elements", common.MAX_ELEMENTS)
 	case .Rest_Param_Not_Last:
 		return "a rest parameter must be the last parameter"
+	case .Constructor_Without_Self:
+		return "a constructor needs a first parameter for the new instance, like 'self'"
 	case .Too_Many_Return_Values:
 		return fmt.tprintf("more than %v return values", common.MAX_RESULTS)
 	case .Compound_Assign_Multi:
@@ -698,6 +743,11 @@ parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 		return "'else' must be on the same line as the '}' before it"
 	}
 	unreachable()
+}
+
+// Parse errors don't have notes yet.
+parse_error_notes :: proc(ast: Ast, error: Parse_Error) -> []Error_Note {
+	return nil
 }
 
 parse_error_span :: proc(ast: Ast, error: Parse_Error) -> common.Span {

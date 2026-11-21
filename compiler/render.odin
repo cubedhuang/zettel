@@ -60,15 +60,22 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 			io.write_byte(w, ' ')
 			io.write_string(w, token_text(ast, node.data.token))
 		}
-	case .Fn_Decl:
+	case .Fn_Decl, .Constructor_Decl:
 		params, body := fn_parts(ast, index)
-		io.write_string(w, "(fn ")
+		io.write_string(w, "(fn " if node.tag == .Fn_Decl else "(constructor ")
 		io.write_string(w, token_text(ast, node.main_token + 1))
 		io.write_byte(w, ' ')
 		render_node_list(w, ast, params, true, indent)
 		io.write_byte(w, '\n')
 		render_indent(w, indent)
 		render_node(w, ast, body, indent + 1)
+		io.write_byte(w, ')')
+	case .Class_Decl:
+		io.write_string(w, "(class ")
+		io.write_string(w, token_text(ast, node.main_token + 1))
+		io.write_byte(w, '\n')
+		render_indent(w, indent)
+		render_node(w, ast, node.data.node, indent + 1)
 		io.write_byte(w, ')')
 	case .Return, .Return_Multi:
 		io.write_string(w, "(return")
@@ -98,6 +105,12 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		render_node(w, ast, node.data.node_and_node.lhs, indent)
 		io.write_byte(w, ' ')
 		render_node(w, ast, node.data.node_and_node.rhs, indent)
+		io.write_byte(w, ')')
+	case .Property:
+		io.write_string(w, "(. ")
+		render_node(w, ast, node.data.node, indent)
+		io.write_byte(w, ' ')
+		io.write_string(w, token_text(ast, node.main_token))
 		io.write_byte(w, ')')
 	case .Number_Literal:
 		io.write_string(w, token_text(ast, node.main_token))

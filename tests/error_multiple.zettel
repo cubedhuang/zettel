@@ -13,10 +13,10 @@ echo a + b
 return ( // error: 'return' outside of a function
     nope // error: 'nope' is not declared
 )
-1 = ( // error: can only assign to variables and elements
+1 = ( // error: can only assign to variables, elements, and properties
     also_nope // error: 'also_nope' is not declared
 )
-outer: {
+outer: { // note: the enclosing statement labeled 'outer' is here
     outer: { // error: label 'outer' is already used by an enclosing statement
         echo inner_nope // error: 'inner_nope' is not declared
     }

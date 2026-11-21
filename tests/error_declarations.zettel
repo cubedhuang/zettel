@@ -1,24 +1,24 @@
-a := 1
+a := 1 // note: 'a' was first declared here
 a := 2 // error: 'a' is already declared in this scope
 {
-    b := 1
+    b := 1 // note: 'b' was first declared here
     b := 2 // error: 'b' is already declared in this scope
 }
-fn f(param) {
+fn f(param) { // note: 'param' was first declared here
     param := 2 // error: 'param' is already declared in this scope
 }
 
 // functions and variables share statics
-x := 1
+x := 1 // note: 'x' was first declared here
 fn x() {} // error: 'x' is already declared in this scope
-fn y() {}
+fn y() {} // note: 'y' was first declared here
 y := 1 // error: 'y' is already declared in this scope
 
 p, q := 1 // error: fewer values than targets
 // only a call alone can give several values
 r, s, t := y(), y() // error: fewer values than targets
 u, v := (y())       // error: fewer values than targets
-1 = 2 // error: can only assign to variables and elements
+1 = 2 // error: can only assign to variables, elements, and properties
 print = 1 // error: can't assign to builtin 'print'
 len += 1  // error: can't assign to builtin 'len'
-2 += 1    // error: can only assign to variables and elements
+2 += 1    // error: can only assign to variables, elements, and properties

@@ -26,6 +26,6 @@ blk: {
         continue blk // error: can't continue 'blk' because it isn't a loop
     }
 }
-a: {
+a: { // note: the enclosing statement labeled 'a' is here
     a: { } // error: label 'a' is already used by an enclosing statement
 }

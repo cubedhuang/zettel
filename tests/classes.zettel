@@ -1,0 +1,195 @@
+// the README's examples
+class Fib {
+    constructor init(self) {
+        self.a = 0
+        self.b = 1
+    }
+    fn next(self) {
+        self.a, self.b = self.b, self.a + self.b
+        return self.a
+    }
+}
+
+fib := Fib.init()
+while n := fib.next(); n < 10 {
+    print(n)
+}
+// expect: 1
+// expect: 1
+// expect: 2
+// expect: 3
+// expect: 5
+// expect: 8
+echo fib // expect: Fib[a = 13, b = 21]
+
+class Vector {
+    constructor init(self, x, y) {
+        self.x = x
+        self.y = y
+    }
+    fn add(a, b) {
+        // a constructor is a static, so it can be called without the class's name
+        return init(a.x + b.x, a.y + b.y)
+    }
+    fn dot(a, b) {
+        return a.x * b.x + a.y * b.y
+    }
+    UNIT_X := init(1, 0)
+}
+
+a := Vector.init(1, 2)
+b := Vector.init(2, 3)
+a = a.add(b)
+echo a                   // expect: Vector[x = 3, y = 5]
+echo a.dot(Vector.UNIT_X) // expect: 3
+// a method is a static that takes the instance first
+echo Vector.add(a, b)    // expect: Vector[x = 5, y = 8]
+echo Vector              // expect: <class Vector>
+echo Vector.init         // expect: <fn init>
+
+// fields and statics can be assigned through properties
+a.x = 10
+a.y += 1
+echo a // expect: Vector[x = 10, y = 6]
+Vector.UNIT_X = "changed"
+echo Vector.UNIT_X // expect: "changed"
+
+// instances compare by identity
+p := Vector.init(1, 1)
+echo p == p                  // expect: true
+echo p == Vector.init(1, 1)  // expect: false
+
+// methods called by the constructor can add fields, and a bare return still gives the instance
+class Config {
+    constructor init(self, debug) {
+        self.name = "app"
+        if !debug { return }
+        self.setup_debug()
+    }
+    fn setup_debug(self) {
+        self.level = 3
+    }
+}
+echo Config.init(false) // expect: Config[name = "app"]
+echo Config.init(true)  // expect: Config[name = "app", level = 3]
+
+// fields print in the order the class first saw them, and an instance can skip some
+class Pair {
+    constructor init(self, flip, has_a) {
+        if flip {
+            self.b = 2
+            if has_a { self.a = 1 }
+        } else {
+            self.a = 1
+            self.b = 2
+        }
+    }
+}
+echo Pair.init(false, true) // expect: Pair[a = 1, b = 2]
+echo Pair.init(true, true)  // expect: Pair[a = 1, b = 2]
+echo Pair.init(true, false) // expect: Pair[b = 2]
+
+// a field holding a function is called without the instance
+class Button {
+    constructor init(self, on_click) {
+        self.on_click = on_click
+    }
+}
+fn clicked(x) {
+    return x * 2
+}
+echo Button.init(clicked).on_click(21) // expect: 42
+
+// constructors and methods take the same kinds of parameters and arguments as functions
+class Bag {
+    constructor init(self, ..items) {
+        self.items = items
+    }
+    fn add(self, ..more) {
+        for_each := more
+        i := 0
+        while i < len(for_each) {
+            push(self.items, for_each[i])
+            i += 1
+        }
+    }
+    fn first_two(self) {
+        return self.items[0], self.items[1]
+    }
+}
+bag := Bag.init(1, 2)
+extra := [3, 4]
+bag.add(..extra)
+echo bag // expect: Bag[items = [1, 2, 3, 4]]
+first, second := bag.first_two()
+echo second // expect: 2
+fn pair() {
+    return 5, 6
+}
+bag.add(pair())
+echo bag.items // expect: [1, 2, 3, 4, 5, 6]
+echo Bag.init(..extra).items // expect: [3, 4]
+
+// methods can capture the instance in closures
+class Counter {
+    constructor init(self) {
+        self.count = 0
+    }
+    fn incrementer(self) {
+        fn increment() {
+            self.count += 1
+            return self.count
+        }
+        return increment
+    }
+}
+counter := Counter.init()
+inc := counter.incrementer()
+inc()
+echo inc()        // expect: 2
+echo counter.count // expect: 2
+
+// an instance that contains itself
+class Node {
+    constructor init(self) {
+        self.next = self
+    }
+}
+echo Node.init() // expect: Node[next = Node[...]]
+
+// a class body runs once, in order, when its declaration runs
+print("before")
+class Loud {
+    print("in Loud")
+    total := 1 + 2
+}
+print("after")
+// expect: before
+// expect: in Loud
+// expect: after
+echo Loud.total // expect: 3
+
+// nested classes see the statics of the classes around them
+greeting := "hi"
+class Outer {
+    prefix := "outer"
+    class Inner {
+        constructor init(self) {
+            self.text = prefix + " " + greeting
+        }
+        fn rename(self) {
+            greeting = "hello"
+        }
+    }
+    inner := Inner.init()
+}
+echo Outer.inner.text // expect: "outer hi"
+echo Outer.Inner      // expect: <class Inner>
+Outer.inner.rename()
+echo greeting         // expect: "hello"
+
+// a file is a class too, so it can have constructors
+constructor make(self, value) {
+    self.value = value
+}
+echo make(7) // expect: classes[value = 7]

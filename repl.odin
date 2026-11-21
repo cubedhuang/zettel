@@ -63,6 +63,6 @@ repl_evaluate :: proc(r: Reporter, state: ^Repl, text: string) {
 
 	// keep the statics for the next line
 	common.static_names_destroy(&state.statics)
-	state.statics = module.statics
-	module.statics = {}
+	state.statics = module.classes[0].statics
+	module.classes[0].statics = {}
 }

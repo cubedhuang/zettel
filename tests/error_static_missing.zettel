@@ -1,0 +1,2 @@
+class Point {}
+echo Point.origin // error: class Point has no static 'origin'

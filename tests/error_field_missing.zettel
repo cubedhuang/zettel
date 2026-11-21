@@ -1,0 +1,6 @@
+class Point {
+    constructor init(self) {
+        self.x = 1
+    }
+}
+echo Point.init().y // error: Point has no field 'y'

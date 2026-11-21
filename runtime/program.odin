@@ -14,6 +14,14 @@ Chunk :: struct {
 	source:    int,
 }
 
+// The objects that `load` made for a module, which its chunks refer to.
+Loaded :: struct {
+	// Index into `Vm.sources`.
+	source:    int,
+	functions: []^Obj_Function,
+	classes:   []^Obj_Class,
+}
+
 chunk_destroy :: proc(chunk: ^Chunk) {
 	delete(chunk.code)
 	delete(chunk.spans)
@@ -28,13 +36,25 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Clo
 	append(&vm.sources, common.source_clone(source^))
 	source_index := len(vm.sources) - 1
 
-	class, found := vm.modules[source.path]
+	classes := make([]^Obj_Class, len(module.classes))
+	defer delete(classes)
+	root, found := vm.modules[source.path]
 	if !found {
-		class = new_class(vm, intern_clone(vm, filepath.short_stem(source.path)))
-		vm.modules[strings.clone(source.path)] = class
+		root = new_class(vm, intern_clone(vm, filepath.short_stem(source.path)), nil)
+		vm.modules[strings.clone(source.path)] = root
 	}
-	for len(class.statics) < common.static_count(module.statics) {
-		append(&class.statics, UNDEFINED)
+	classes[0] = root
+	for class, index in module.classes {
+		if index > 0 {
+			name := intern_clone(vm, common.class_name(module, class))
+			// a class comes after the class it's declared in
+			classes[index] = new_class(vm, name, classes[class.outer])
+		}
+		loaded := classes[index]
+		for slot in len(loaded.statics) ..< common.static_count(class.statics) {
+			append(&loaded.statics, UNDEFINED)
+			loaded.slots[intern_clone(vm, common.static_name(class.statics, slot))] = slot
+		}
 	}
 
 	// Chunks can refer to any function, so this makes all functions before it loads the chunks.
@@ -42,28 +62,24 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Clo
 	defer delete(functions)
 	for function, index in module.functions {
 		name := intern_clone(vm, common.function_name(module, function))
-		functions[index] = new_function(vm, class, name, function.arity)
+		functions[index] = new_function(vm, classes[function.class], name, function.arity)
+		functions[index].kind = function.kind
 		functions[index].variadic = function.variadic
 		functions[index].upvalue_count = function.upvalue_count
 	}
+	loaded := Loaded{source_index, functions, classes}
 	for function, index in module.functions {
-		functions[index].chunk = load_chunk(vm, source_index, module, functions, function.chunk)
+		functions[index].chunk = load_chunk(vm, module, loaded, function.chunk)
 	}
 
-	main := new_function(vm, class, nil, 0)
-	main.chunk = load_chunk(vm, source_index, module, functions, module.main)
+	main := new_function(vm, root, nil, 0)
+	main.kind = .Class_Body
+	main.chunk = load_chunk(vm, module, loaded, module.main)
 	return new_closure(vm, main)
 }
 
-// `chunk` belongs to `module`, and `functions` are the loaded `module.functions`. `source` indexes
-// `vm.sources`.
-load_chunk :: proc(
-	vm: ^Vm,
-	source: int,
-	module: common.Module,
-	functions: []^Obj_Function,
-	chunk: common.Chunk,
-) -> Chunk {
+// `chunk` belongs to `module`.
+load_chunk :: proc(vm: ^Vm, module: common.Module, loaded: Loaded, chunk: common.Chunk) -> Chunk {
 	constants := make([]Value, len(chunk.constants))
 	for constant, index in chunk.constants {
 		switch c in constant {
@@ -74,18 +90,20 @@ load_chunk :: proc(
 			constants[index] = to_value(value)
 		case common.Constant_Function:
 			// See `common.Function.upvalue_count`.
-			function := functions[c.index]
+			function := loaded.functions[c.index]
 			if function.upvalue_count == 0 {
 				constants[index] = to_value(new_closure(vm, function))
 			} else {
 				constants[index] = to_value(function)
 			}
+		case common.Constant_Class:
+			constants[index] = to_value(loaded.classes[c.index])
 		}
 	}
 	return {
 		code = slice.clone(chunk.code),
 		spans = slice.clone(chunk.spans),
 		constants = constants,
-		source = source,
+		source = loaded.source,
 	}
 }

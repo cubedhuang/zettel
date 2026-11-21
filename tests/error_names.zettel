@@ -11,8 +11,8 @@ echo w // error: 'w' is not declared
 // class-body code can't use a static before its declaration
 x := x // error: 'x' is used before its declaration
 echo later // error: 'later' is used before its declaration
-later := 1
+later := 1 // note: 'later' is declared here
 {
     assigned_later = 2 // error: 'assigned_later' is used before its declaration
 }
-assigned_later := 1
+assigned_later := 1 // note: 'assigned_later' is declared here

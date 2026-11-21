@@ -29,6 +29,8 @@ Diagnostic :: struct {
 	severity: Severity,
 	span:     common.Span,
 	message:  string,
+	// Shown right after the diagnostic. Their severity is usually `Note`.
+	notes:    []Diagnostic,
 }
 
 Style :: enum u8 {
@@ -128,6 +130,8 @@ render_diagnostic :: proc(
 			}
 		}
 	}
+
+	for note in diagnostic.notes do render_diagnostic(t, source, note, options)
 }
 
 // `level: message`

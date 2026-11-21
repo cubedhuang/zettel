@@ -1,0 +1,5 @@
+class Point {
+    constructor init(self, x, y) {}
+}
+// the caller doesn't pass the instance
+Point.init(1) // error: expected 2 arguments, got 1

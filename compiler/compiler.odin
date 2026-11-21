@@ -11,21 +11,16 @@ import "core:strconv"
 Compiler :: struct {
 	ast:                 Ast,
 	chunk:               ^Chunk_Compiler,
+	class:               ^Class_Compiler,
 	functions:           [dynamic]common.Function,
+	// The file's class is first. A class's `statics` are set after its body is compiled.
+	classes:             [dynamic]common.Class,
 	string_bytes:        [dynamic]u8,
 	// The keys are slices of the source or of `decoded_strings`.
 	string_locations:    map[string]common.Constant_String,
 	// String literals with escapes, which `strconv.unquote_string` allocated.
 	decoded_strings:     [dynamic]string,
-
-	// Same format as `common.Static_Names`.
-	static_bytes:        [dynamic]u8,
-	static_ends:         [dynamic]u32,
-	// The keys are slices of the source or of the previous `Static_Names`.
-	static_slots:        map[string]int,
-	// Whether class-body code can use each static yet.
-	static_visible:      [dynamic]bool,
-	// Lets the REPL declare a name more than once.
+	// Lets the REPL declare a static of the file's class more than once.
 	allow_redeclaration: bool,
 	// Whether top-level expression statements are echoed, like in the REPL.
 	echo_statements:     bool,
@@ -38,9 +33,28 @@ Compiler :: struct {
 	reported_names:      map[Name_Error]struct{},
 }
 
-// Intermediate data about the class body or a function.
+// Intermediate data about the class being compiled.
+Class_Compiler :: struct {
+	// The class it's declared in.
+	outer:          ^Class_Compiler,
+	// Index into `Compiler.classes`.
+	index:          int,
+	// Same format as `common.Static_Names`.
+	static_bytes:   [dynamic]u8,
+	static_ends:    [dynamic]u32,
+	// The keys are slices of the source or of the previous `Static_Names`.
+	static_slots:   map[string]int,
+	// Whether class-body code can use each static yet.
+	static_visible: [dynamic]bool,
+	// The declaration of each static, or 0 for one from a previous `Static_Names`.
+	static_nodes:   [dynamic]Node_Index,
+}
+
+// Intermediate data about a class body or a function.
 Chunk_Compiler :: struct {
+	// nil for a class body.
 	enclosing:          ^Chunk_Compiler,
+	kind:               common.Function_Kind,
 	code:               [dynamic]u8,
 	spans:              [dynamic]common.Span,
 	constants:          [dynamic]common.Constant,
@@ -59,6 +73,8 @@ Chunk_Compiler :: struct {
 
 Local :: struct {
 	name:     string,
+	// The declaration.
+	node:     Node_Index,
 	depth:    int,
 	// Whether a nested function captures it, so leaving its scope must close the upvalue.
 	captured: bool,
@@ -67,12 +83,16 @@ Local :: struct {
 Variable :: struct {
 	kind: enum u8 {
 		Static,
+		// A static of a class that the current class is declared in.
+		Outer_Static,
 		Local,
 		Upvalue,
 		Builtin,
 	},
 	// Index into `static_slots`, `locals`, `upvalues`, or the builtins
 	slot: int,
+	// For `Outer_Static`, how many classes out the static is.
+	hops: int,
 }
 
 // Target for `break` and sometimes `continue`.
@@ -86,6 +106,8 @@ Target :: struct {
 	start:   int,
 	// Locals deeper than this belong to the target.
 	depth:   int,
+	// The `Labeled` node, or 0 for an unlabeled loop.
+	node:    Node_Index,
 }
 
 Break :: struct {
@@ -96,8 +118,16 @@ Break :: struct {
 }
 
 Compile_Error :: struct {
-	tag:  Compile_Error_Tag,
-	node: Node_Index,
+	tag:     Compile_Error_Tag,
+	node:    Node_Index,
+	// An earlier node that a note points at, or 0.
+	related: Node_Index,
+}
+
+// Extra information about an error, at another place in the source.
+Error_Note :: struct {
+	span:    common.Span,
+	message: string,
 }
 
 Compile_Error_Tag :: enum u8 {
@@ -111,7 +141,7 @@ Compile_Error_Tag :: enum u8 {
 	Too_Many_Upvalues,
 	// `node` is the identifier.
 	Undeclared,
-	// `node` is the identifier or `Fn_Decl`.
+	// `node` is the identifier or declaration. `related` is the first declaration, if known.
 	Redeclared,
 	// `node` is the target.
 	Invalid_Assignment_Target,
@@ -131,14 +161,20 @@ Compile_Error_Tag :: enum u8 {
 	Continue_Not_Loop,
 	// `node` is the `continue`.
 	Continue_From_Else,
-	// `node` is the `Labeled`.
+	// `node` is the `Labeled`. `related` is the enclosing `Labeled`.
 	Label_Shadowed,
 	// `node` is the `return`.
 	Return_Outside_Function,
-	// `node` is the identifier.
+	// `node` is the identifier. `related` is the declaration, if known.
 	Used_Before_Declaration,
 	// `node` is the identifier.
 	Assign_To_Builtin,
+	// `node` is the `Class_Decl` or `Constructor_Decl`.
+	Not_In_Class_Body,
+	// `node` is the `Class_Decl`.
+	Classes_Too_Deep,
+	// `node` is the `return`.
+	Return_In_Constructor,
 }
 
 Name_Error :: struct {
@@ -184,8 +220,8 @@ compound_ops := #partial [Token_Tag]common.Op {
 	.Gt_Gt_Eq           = .Shift_Right,
 }
 
-// `statics` are the names of statics declared by earlier compilations of the same class, such as
-// previous REPL lines. They're copied into `module.statics` along with any new ones.
+// `statics` are the names of statics declared by earlier compilations of the same file, such as
+// previous REPL lines. They're copied into the statics of the file's class along with any new ones.
 //
 // `errors` are in source order. The caller must free them. Uses `context.temp_allocator`.
 compile :: proc(
@@ -199,10 +235,14 @@ compile :: proc(
 ) {
 	assert(len(ast.errors) == 0, "unable to compile an ast with errors")
 
-	main: Chunk_Compiler
+	main := Chunk_Compiler {
+		kind = .Class_Body,
+	}
+	root: Class_Compiler
 	c := Compiler {
 		ast                 = ast,
 		chunk               = &main,
+		class               = &root,
 		allow_redeclaration = allow_redeclaration,
 		echo_statements     = echo_statements,
 	}
@@ -211,25 +251,24 @@ compile :: proc(
 		for s in c.decoded_strings do delete(s)
 		delete(c.decoded_strings)
 	}
-	defer delete(c.static_slots)
-	defer delete(c.static_visible)
 	defer delete(c.reported_names)
 
-	append(&c.static_bytes, ..statics.bytes)
-	append(&c.static_ends, ..statics.ends)
+	append(&root.static_bytes, ..statics.bytes)
+	append(&root.static_ends, ..statics.ends)
 	for slot in 0 ..< common.static_count(statics) {
-		c.static_slots[common.static_name(statics, slot)] = slot
-		append(&c.static_visible, true)
+		root.static_slots[common.static_name(statics, slot)] = slot
+		append(&root.static_visible, true)
+		append(&root.static_nodes, 0)
 	}
+	append(&c.classes, common.Class{})
 
-	compile_root(&c)
+	end := token_span(c.ast, Token_Index(len(c.ast.tokens) - 1))
+	compile_class_body(&c, root_statements(c.ast), end)
 	module.main = finish_chunk(&main)
+	c.classes[0].statics = finish_class(&root)
 	module.functions = c.functions[:]
+	module.classes = c.classes[:]
 	module.string_bytes = c.string_bytes[:]
-	module.statics = {
-		bytes = c.static_bytes[:],
-		ends  = c.static_ends[:],
-	}
 
 	if len(c.errors) > 0 {
 		common.module_destroy(&module)
@@ -262,15 +301,26 @@ finish_chunk :: proc(chunk: ^Chunk_Compiler) -> common.Chunk {
 	return {code = chunk.code[:], spans = chunk.spans[:], constants = chunk.constants[:]}
 }
 
-compile_root :: proc(c: ^Compiler) {
-	statements := root_statements(c.ast)
+// Frees the compiler's scratch data and returns the class's static names.
+finish_class :: proc(class: ^Class_Compiler) -> common.Static_Names {
+	delete(class.static_slots)
+	delete(class.static_visible)
+	delete(class.static_nodes)
+	return {bytes = class.static_bytes[:], ends = class.static_ends[:]}
+}
+
+// Compiles the statements of `c.class`'s body into `c.chunk`. `end` is the source of the code at the
+// end of the body.
+compile_class_body :: proc(c: ^Compiler, statements: []Node_Index, end: common.Span) {
 	for statement in statements {
 		#partial switch c.ast.nodes[statement].tag {
-		case .Fn_Decl:
+		case .Fn_Decl, .Constructor_Decl:
 			name := declared_name(c.ast, statement)
 			if declare_static(c, name, statement) {
-				c.static_visible[c.static_slots[name]] = true
+				c.class.static_visible[c.class.static_slots[name]] = true
 			}
+		case .Class_Decl:
+			declare_static(c, declared_name(c.ast, statement), statement)
 		case .Decl, .Decl_Multi:
 			for target in assign_targets(c.ast, statement) {
 				declare_static(c, token_text(c.ast, c.ast.nodes[target].main_token), target)
@@ -278,17 +328,20 @@ compile_root :: proc(c: ^Compiler) {
 		}
 	}
 
-	// hoist functions
+	// hoist functions and constructors
 	for statement in statements {
-		if c.ast.nodes[statement].tag == .Fn_Decl do compile_fn_decl(c, statement)
+		if is_fn_decl(c.ast, statement) do compile_fn_decl(c, statement)
 	}
 	for statement in statements {
-		if c.ast.nodes[statement].tag != .Fn_Decl do compile_statement(c, statement)
+		if !is_fn_decl(c.ast, statement) do compile_statement(c, statement)
 	}
-	span := token_span(c.ast, Token_Index(len(c.ast.tokens) - 1))
-	emit(c, .Nil, span)
-	emit(c, .Return, span)
-	emit_byte(c, 1, span)
+	emit(c, .Nil, end)
+	emit(c, .Return, end)
+	emit_byte(c, 1, end)
+}
+
+is_fn_decl :: proc(ast: Ast, index: Node_Index) -> bool {
+	return ast.nodes[index].tag == .Fn_Decl || ast.nodes[index].tag == .Constructor_Decl
 }
 
 compile_statement :: proc(c: ^Compiler, index: Node_Index) {
@@ -314,20 +367,22 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		compile_labeled(c, index)
 	case .Break, .Continue:
 		compile_break(c, index)
-	case .Fn_Decl:
+	case .Fn_Decl, .Constructor_Decl:
 		compile_fn_decl(c, index)
+	case .Class_Decl:
+		compile_class_decl(c, index)
 	case .Return, .Return_Multi:
 		compile_return(c, index)
 	case .Call_One, .Call:
 		// a call statement discards however many values it returns
 		compile_call(c, index, common.ALL_RESULTS)
 		span := node_span(c.ast, index)
-		if c.echo_statements && in_static_scope(c) do emit(c, .Echo_Results, span)
+		if echoes_statements(c) do emit(c, .Echo_Results, span)
 		emit(c, .Pop_Results, span)
 	case:
 		compile_expression(c, index)
 		span := node_span(c.ast, index)
-		if c.echo_statements && in_static_scope(c) && node.tag != .Echo {
+		if echoes_statements(c) && node.tag != .Echo {
 			emit(c, .Echo_Result, span)
 		}
 		emit(c, .Pop, span)
@@ -338,7 +393,7 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 	targets := assign_targets(c.ast, index)
 	valid := true
 	for target in targets {
-		if c.ast.nodes[target].tag == .Index {
+		if c.ast.nodes[target].tag == .Index || c.ast.nodes[target].tag == .Property {
 			continue
 		} else if c.ast.nodes[target].tag != .Identifier {
 			fail(c, .Invalid_Assignment_Target, target)
@@ -364,6 +419,11 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 			emit(c, .Set_Index, span)
 			continue
 		}
+		if c.ast.nodes[target].tag == .Property {
+			compile_expression(c, c.ast.nodes[target].data.node)
+			emit_property(c, .Set_Property, target, span)
+			continue
+		}
 		variable, _ := resolve(c, target)
 		emit_set(c, variable, span)
 	}
@@ -384,6 +444,14 @@ compile_compound_assign :: proc(c: ^Compiler, index: Node_Index) {
 		compile_expression(c, value)
 		emit(c, op, span)
 		emit(c, .Update_Index, node_span(c.ast, target))
+	case .Property:
+		// the object is evaluated once
+		target_span := node_span(c.ast, target)
+		compile_expression(c, c.ast.nodes[target].data.node)
+		emit_property(c, .Get_Property_Keep, target, target_span)
+		compile_expression(c, value)
+		emit(c, op, span)
+		emit_property(c, .Update_Property, target, target_span)
 	case .Identifier:
 		variable, ok := resolve(c, target)
 		if ok && variable.kind == .Builtin {
@@ -418,11 +486,12 @@ compile_decl :: proc(c: ^Compiler, index: Node_Index) {
 	}
 
 	for target in targets {
-		c.static_visible[c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]] = true
+		c.class.static_visible[c.class.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]] =
+			true
 	}
 	#reverse for target in targets {
-		slot := c.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]
-		emit_variable(c, .Set_Static, {.Static, slot}, node_span(c.ast, target))
+		slot := c.class.static_slots[token_text(c.ast, c.ast.nodes[target].main_token)]
+		emit_variable(c, .Set_Static, {kind = .Static, slot = slot}, node_span(c.ast, target))
 	}
 }
 
@@ -499,7 +568,7 @@ compile_labeled :: proc(c: ^Compiler, index: Node_Index) {
 	label := token_text(c.ast, c.ast.nodes[index].main_token)
 	for target in c.chunk.targets {
 		if target.label == label {
-			fail(c, .Label_Shadowed, index)
+			fail(c, .Label_Shadowed, index, target.node)
 			break
 		}
 	}
@@ -509,7 +578,7 @@ compile_labeled :: proc(c: ^Compiler, index: Node_Index) {
 	case .While_Simple, .While:
 		compile_while(c, statement, label)
 	case:
-		target := begin_target(c, {label = label, depth = c.chunk.depth})
+		target := begin_target(c, {label = label, depth = c.chunk.depth, node = index})
 		compile_statement(c, statement)
 		end_target(c, target, index)
 	}
@@ -567,12 +636,19 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 	name_span := token_span(c.ast, c.ast.nodes[index].main_token + 1)
 	params, body := fn_parts(c.ast, index)
 	variadic := fn_is_variadic(c.ast, params)
+	kind: common.Function_Kind =
+		.Constructor if c.ast.nodes[index].tag == .Constructor_Decl else .Function
 
 	is_static := in_static_scope(c)
-	if !is_static do declare_local(c, name, index)
+	if !is_static {
+		// a constructor needs a class to make instances of
+		if kind == .Constructor do fail(c, .Not_In_Class_Body, index)
+		declare_local(c, name, index)
+	}
 
 	chunk := Chunk_Compiler {
 		enclosing = c.chunk,
+		kind      = kind,
 	}
 	c.chunk = &chunk
 	begin_scope(c)
@@ -601,16 +677,83 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 		for capture in chunk.upvalues do emit_capture(c, capture, span)
 	}
 	if is_static {
-		emit_variable(c, .Set_Static, {.Static, c.static_slots[name]}, name_span)
+		emit_variable(
+			c,
+			.Set_Static,
+			{kind = .Static, slot = c.class.static_slots[name]},
+			name_span,
+		)
 	}
 
 	append(
 		&c.functions,
 		common.Function {
+			kind = kind,
 			name = add_string_bytes(c, name),
-			arity = len(params) - int(variadic),
+			class = u32(c.class.index),
+			arity = len(params) - int(variadic) - int(kind == .Constructor),
 			variadic = variadic,
 			upvalue_count = upvalue_count,
+			chunk = finish_chunk(&chunk),
+		},
+	)
+}
+
+// Compiles the declaration of a class in the current class. The class's body runs when the
+// declaration does.
+compile_class_decl :: proc(c: ^Compiler, index: Node_Index) {
+	name := declared_name(c.ast, index)
+	name_span := token_span(c.ast, c.ast.nodes[index].main_token + 1)
+	body := c.ast.nodes[index].data.node
+
+	depth := 1
+	for class := c.class; class.outer != nil; class = class.outer do depth += 1
+	if depth > common.MAX_CLASS_DEPTH do fail(c, .Classes_Too_Deep, index)
+
+	class_index := len(c.classes)
+	append(&c.classes, common.Class{name = add_string_bytes(c, name), outer = u32(c.class.index)})
+
+	// assign the class first so its body can use it
+	emit_constant(c, common.Constant_Class{u32(class_index)}, index)
+	if in_static_scope(c) {
+		slot := c.class.static_slots[name]
+		c.class.static_visible[slot] = true
+		emit_variable(c, .Set_Static, {kind = .Static, slot = slot}, name_span)
+	} else {
+		// the class's value lands in its slot
+		fail(c, .Not_In_Class_Body, index)
+		declare_local(c, name, index)
+	}
+
+	class := Class_Compiler {
+		outer = c.class,
+		index = class_index,
+	}
+	chunk := Chunk_Compiler {
+		kind = .Class_Body,
+	}
+	enclosing := c.chunk
+	c.class, c.chunk = &class, &chunk
+	compile_class_body(
+		c,
+		block_statements(c.ast, body),
+		token_span(c.ast, last_token(c.ast, body)),
+	)
+	c.class, c.chunk = class.outer, enclosing
+	c.classes[class_index].statics = finish_class(&class)
+
+	// Functions in the body were added while compiling it, so the body goes after them.
+	emit_constant(c, common.Constant_Function{u32(len(c.functions))}, index)
+	emit(c, .Call, name_span)
+	emit_byte(c, 0, name_span)
+	emit_byte(c, 1, name_span)
+	emit(c, .Pop, name_span)
+	append(
+		&c.functions,
+		common.Function {
+			kind = .Class_Body,
+			name = add_string_bytes(c, name),
+			class = u32(class_index),
 			chunk = finish_chunk(&chunk),
 		},
 	)
@@ -619,6 +762,8 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 compile_return :: proc(c: ^Compiler, index: Node_Index) {
 	if in_class_body(c) do fail(c, .Return_Outside_Function, index)
 	values := return_values(c.ast, index)
+	// the VM returns the new instance instead of the value
+	if c.chunk.kind == .Constructor && len(values) > 0 do fail(c, .Return_In_Constructor, index)
 	span := node_span(c.ast, index)
 	count := len(values)
 	switch {
@@ -682,6 +827,9 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		compile_expression(c, node.data.node_and_node.lhs)
 		compile_expression(c, node.data.node_and_node.rhs)
 		emit(c, .Get_Index, span)
+	case .Property:
+		compile_expression(c, node.data.node)
+		emit_property(c, .Get_Property, index, span)
 	case .Call_One, .Call:
 		compile_call(c, index, 1)
 	case .And, .Or:
@@ -720,19 +868,30 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 compile_call :: proc(c: ^Compiler, index: Node_Index, results: int) {
 	span := node_span(c.ast, index)
 	callee, args := call_parts(c.ast, index)
-	compile_expression(c, callee)
+	// `object.name(args)` is a method call, which doesn't get the property first
+	is_invoke := c.ast.nodes[callee].tag == .Property
+	compile_expression(c, c.ast.nodes[callee].data.node if is_invoke else callee)
 	if len(args) == 1 && is_call(c.ast, args[0]) {
 		// a call that's the only argument passes all of its values
 		compile_call(c, args[0], common.ALL_RESULTS)
-		emit(c, .Call, span)
+		emit_call(c, .Invoke if is_invoke else .Call, callee, span)
 		emit_byte(c, common.ALL_RESULTS, span)
 	} else if compile_list(c, args, span) {
-		emit(c, .Call_Spread, span)
+		emit_call(c, .Invoke_Spread if is_invoke else .Call_Spread, callee, span)
 	} else {
-		emit(c, .Call, span)
+		emit_call(c, .Invoke if is_invoke else .Call, callee, span)
 		emit_byte(c, u8(len(args)), span)
 	}
 	emit_byte(c, u8(results), span)
+}
+
+// Emits a call instruction, followed by the name operand for `Invoke` and `Invoke_Spread`.
+emit_call :: proc(c: ^Compiler, op: common.Op, callee: Node_Index, span: common.Span) {
+	if op == .Invoke || op == .Invoke_Spread {
+		emit_property(c, op, callee, span)
+	} else {
+		emit(c, op, span)
+	}
 }
 
 // Pushes the arguments or elements in `items`. If any item is a `Spread`, this collects them all
@@ -808,54 +967,66 @@ in_static_scope :: proc(c: ^Compiler) -> bool {
 	return in_class_body(c) && c.chunk.depth == 0
 }
 
+// Whether expression statements are echoed here. Only the file's class body echoes them.
+echoes_statements :: proc(c: ^Compiler) -> bool {
+	return c.echo_statements && in_static_scope(c) && c.class.outer == nil
+}
+
 // `node` is the declaration's source for errors.
 declare_local :: proc(c: ^Compiler, name: string, node: Node_Index) {
 	#reverse for local in c.chunk.locals {
 		if local.depth < c.chunk.depth do break
-		if local.name == name do fail(c, .Redeclared, node)
+		if local.name == name do fail(c, .Redeclared, node, local.node)
 	}
 	if len(c.chunk.locals) >= common.MAX_LOCALS do fail(c, .Too_Many_Locals, node)
 	// append on failure to keep locals in sync with the stack
-	append(&c.chunk.locals, Local{name = name, depth = c.chunk.depth})
+	append(&c.chunk.locals, Local{name = name, node = node, depth = c.chunk.depth})
 }
 
 // `node` is the declaration's source for errors.
 declare_static :: proc(c: ^Compiler, name: string, node: Node_Index) -> (ok: bool) {
-	if name in c.static_slots {
-		if !c.allow_redeclaration {
-			fail(c, .Redeclared, node)
+	class := c.class
+	if slot, found := class.static_slots[name]; found {
+		if !c.allow_redeclaration || class.outer != nil {
+			fail(c, .Redeclared, node, class.static_nodes[slot])
 			return false
 		}
 		return true
 	}
-	if len(c.static_ends) >= common.MAX_STATICS {
+	if len(class.static_ends) >= common.MAX_STATICS {
 		fail(c, .Too_Many_Statics, node)
 		return false
 	}
-	c.static_slots[name] = len(c.static_ends)
-	append(&c.static_bytes, name)
-	append(&c.static_ends, u32(len(c.static_bytes)))
-	append(&c.static_visible, false)
+	class.static_slots[name] = len(class.static_ends)
+	append(&class.static_bytes, name)
+	append(&class.static_ends, u32(len(class.static_bytes)))
+	append(&class.static_visible, false)
+	append(&class.static_nodes, node)
 	return true
 }
 
 resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok: bool) {
 	name := token_text(c.ast, c.ast.nodes[identifier].main_token)
 	#reverse for local, slot in c.chunk.locals {
-		if local.name == name do return {.Local, slot}, true
+		if local.name == name do return {kind = .Local, slot = slot}, true
 	}
 	if index, found := resolve_upvalue(c, c.chunk, name, identifier); found {
-		return {.Upvalue, index}, true
+		return {kind = .Upvalue, slot = index}, true
 	}
-	if slot, found := c.static_slots[name]; found {
-		if in_class_body(c) && !c.static_visible[slot] {
-			fail(c, .Used_Before_Declaration, identifier)
-			return
+	hops := 0
+	for class := c.class; class != nil; class = class.outer {
+		if slot, found := class.static_slots[name]; found {
+			if in_class_body(c) && !class.static_visible[slot] {
+				fail(c, .Used_Before_Declaration, identifier, class.static_nodes[slot])
+				return
+			}
+			if hops == 0 do return {kind = .Static, slot = slot}, true
+			return {kind = .Outer_Static, slot = slot, hops = hops}, true
 		}
-		return {.Static, slot}, true
+		hops += 1
 	}
 	for builtin_name, builtin in common.builtin_names {
-		if builtin_name == name do return {.Builtin, int(builtin)}, true
+		if builtin_name == name do return {kind = .Builtin, slot = int(builtin)}, true
 	}
 	fail(c, .Undeclared, identifier)
 	return
@@ -928,11 +1099,26 @@ emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: com
 	emit_u16(c, variable.slot, span)
 }
 
+emit_outer_static :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: common.Span) {
+	emit(c, op, span)
+	emit_byte(c, u8(variable.hops), span)
+	emit_u16(c, variable.slot, span)
+}
+
+// Emits an instruction whose operand is the name of a `Property` node.
+emit_property :: proc(c: ^Compiler, op: common.Op, property: Node_Index, span: common.Span) {
+	name := token_text(c.ast, c.ast.nodes[property].main_token)
+	emit(c, op, span)
+	emit_u16(c, add_constant(c, add_string_bytes(c, name), property), span)
+}
+
 // Pushes the variable's value.
 emit_get :: proc(c: ^Compiler, variable: Variable, span: common.Span) {
 	switch variable.kind {
 	case .Static:
 		emit_variable(c, .Get_Static, variable, span)
+	case .Outer_Static:
+		emit_outer_static(c, .Get_Outer_Static, variable, span)
 	case .Local:
 		emit_variable(c, .Get_Local, variable, span)
 	case .Upvalue:
@@ -949,6 +1135,8 @@ emit_set :: proc(c: ^Compiler, variable: Variable, span: common.Span) {
 	#partial switch variable.kind {
 	case .Static:
 		emit_variable(c, .Set_Static, variable, span)
+	case .Outer_Static:
+		emit_outer_static(c, .Set_Outer_Static, variable, span)
 	case .Local:
 		emit_variable(c, .Set_Local, variable, span)
 	case .Upvalue:
@@ -1052,13 +1240,15 @@ parse_number :: proc(text: string) -> (value: f64, ok: bool) {
 // Compilation continues after an error to find more errors.
 //
 // The caller discards the module, so the code emitted after an error does not need to make sense.
-fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index) {
+// `related` is an earlier node for a note to point at.
+fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index, related: Node_Index = 0) {
 	#partial switch tag {
 	case .Too_Many_Constants,
 	     .Jump_Too_Large,
 	     .Too_Many_Statics,
 	     .Too_Many_Locals,
-	     .Too_Many_Upvalues:
+	     .Too_Many_Upvalues,
+	     .Classes_Too_Deep:
 		if tag in c.reported_once do return
 		c.reported_once += {tag}
 	case .Undeclared, .Used_Before_Declaration:
@@ -1066,7 +1256,7 @@ fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index) {
 		if key in c.reported_names do return
 		c.reported_names[key] = {}
 	}
-	append(&c.errors, Compile_Error{tag, node})
+	append(&c.errors, Compile_Error{tag, node, related})
 }
 
 error_message :: proc {
@@ -1077,6 +1267,11 @@ error_message :: proc {
 error_span :: proc {
 	parse_error_span,
 	compile_error_span,
+}
+
+error_notes :: proc {
+	parse_error_notes,
+	compile_error_notes,
 }
 
 // Uses `context.temp_allocator`.
@@ -1105,7 +1300,7 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 			declared_name(ast, error.node),
 		)
 	case .Invalid_Assignment_Target:
-		return "can only assign to variables and elements"
+		return "can only assign to variables, elements, and properties"
 	case .Too_Few_Values:
 		return "fewer values than targets"
 	case .Too_Many_Results:
@@ -1154,10 +1349,45 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 		)
 	case .Invalid_String:
 		return "invalid escape sequence in string"
+	case .Not_In_Class_Body:
+		return fmt.tprintf(
+			"%v can only be declared directly in a class body",
+			"a class" if ast.nodes[error.node].tag == .Class_Decl else "a constructor",
+		)
+	case .Classes_Too_Deep:
+		return fmt.tprintf("classes nested more than %v deep", common.MAX_CLASS_DEPTH)
+	case .Return_In_Constructor:
+		return "a constructor can't return a value, because it returns the new instance"
 	}
 	unreachable()
 }
 
 compile_error_span :: proc(ast: Ast, error: Compile_Error) -> common.Span {
+	if error.tag == .Redeclared do return declaration_span(ast, error.node)
 	return node_span(ast, error.node)
+}
+
+// Uses `context.temp_allocator`.
+compile_error_notes :: proc(ast: Ast, error: Compile_Error) -> []Error_Note {
+	if error.related == 0 do return nil
+	// a note on the same line, as in `x := x`, would only repeat the error
+	a, b := ast.nodes[error.node].main_token, ast.nodes[error.related].main_token
+	if tokens_on_same_line(ast, min(a, b), max(a, b)) do return nil
+	message: string
+	#partial switch error.tag {
+	case .Redeclared:
+		message = fmt.tprintf("'%v' was first declared here", declared_name(ast, error.related))
+	case .Used_Before_Declaration:
+		message = fmt.tprintf("'%v' is declared here", declared_name(ast, error.related))
+	case .Label_Shadowed:
+		message = fmt.tprintf(
+			"the enclosing statement labeled '%v' is here",
+			token_text(ast, ast.nodes[error.related].main_token),
+		)
+	case:
+		return nil
+	}
+	notes := make([]Error_Note, 1, context.temp_allocator)
+	notes[0] = {declaration_span(ast, error.related), message}
+	return notes
 }

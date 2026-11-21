@@ -1,0 +1,10 @@
+// a field can't have the name of a static, because `t.hi()` would call the field
+class Test {
+    constructor init(self, a) {
+        self.hi = a // error: a field named 'hi' would hide the static 'hi' of Test
+    }
+    fn hi(self) {
+        print("hello world")
+    }
+}
+t := Test.init(1)

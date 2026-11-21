@@ -61,6 +61,10 @@ Op :: enum u8 {
 	Set_Static,
 	Get_Local,
 	Set_Local,
+	// The first operand is how many classes out from the current class the static is, at least 1.
+	// The second operand indexes that class's statics.
+	Get_Outer_Static,
+	Set_Outer_Static,
 	// The operand is a `Builtin`.
 	Get_Builtin,
 	// The operand indexes the current closure's upvalues.
@@ -76,6 +80,21 @@ Op :: enum u8 {
 	Get_Index_Keep,
 	// Pops the new element, then the index, then the indexed value.
 	Update_Index,
+	// Properties
+	//
+	// The operand is the index of the name's string constant. An instance's properties are its
+	// fields, and a class's properties are its statics.
+	//
+	// Pops the object and pushes the property's value.
+	Get_Property,
+	// Pops the object, then the new value. The value is below the object for the same reason as in
+	// `Set_Index`.
+	Set_Property,
+	// Like `Get_Property`, but leaves the object below the value. Compound assignment uses it before
+	// `Update_Property`.
+	Get_Property_Keep,
+	// Pops the new value, then the object.
+	Update_Property,
 	// Functions
 	//
 	// Pushes a new closure of a function that captures variables. The operand is the index of
@@ -91,6 +110,16 @@ Op :: enum u8 {
 	// Like `Call`, but the arguments are an array on top of the stack, from spreading. The
 	// operand is the expected number of return values.
 	Call_Spread,
+	// Calls a method or function property of the value below the arguments. The first operand is
+	// the index of the name's string constant, and the others are like those of `Call`.
+	//
+	// For an instance, a field with the name is called with the arguments. Otherwise the static of
+	// the instance's class with the name is called with the instance before the arguments. For a
+	// class, its static is called with the arguments.
+	Invoke,
+	// Like `Invoke`, but the arguments are an array on top of the stack, like in `Call_Spread`. The
+	// operands are the name and the expected number of return values.
+	Invoke_Spread,
 	// Pops the frame, including the callee, and pushes the return values in its place. The
 	// operand is how many values are on top of the stack, or `ALL_RESULTS` to forward the values
 	// of the call right before it.
@@ -108,24 +137,32 @@ Op :: enum u8 {
 }
 
 op_operand_size := #partial [Op]int {
-	.Constant      = 2,
-	.Array         = 2,
-	.Jump          = 2,
-	.Jump_If_False = 2,
-	.Jump_If_True  = 2,
-	.Loop          = 2,
-	.Get_Static    = 2,
-	.Set_Static    = 2,
-	.Get_Local     = 2,
-	.Set_Local     = 2,
-	.Get_Builtin   = 1,
-	.Get_Upvalue   = 1,
-	.Set_Upvalue   = 1,
+	.Constant          = 2,
+	.Array             = 2,
+	.Jump              = 2,
+	.Jump_If_False     = 2,
+	.Jump_If_True      = 2,
+	.Loop              = 2,
+	.Get_Static        = 2,
+	.Set_Static        = 2,
+	.Get_Local         = 2,
+	.Set_Local         = 2,
+	.Get_Outer_Static  = 3,
+	.Set_Outer_Static  = 3,
+	.Get_Builtin       = 1,
+	.Get_Upvalue       = 1,
+	.Set_Upvalue       = 1,
+	.Get_Property      = 2,
+	.Set_Property      = 2,
+	.Get_Property_Keep = 2,
+	.Update_Property   = 2,
 	// Does not include the captures.
-	.Closure       = 2,
-	.Call          = 2,
-	.Call_Spread   = 1,
-	.Return        = 1,
+	.Closure           = 2,
+	.Call              = 2,
+	.Call_Spread       = 1,
+	.Invoke            = 4,
+	.Invoke_Spread     = 3,
+	.Return            = 1,
 }
 
 // As the expected result count of `Call` and `Call_Spread`, or as the count of `Return`, this means
@@ -160,6 +197,7 @@ MAX_STATICS :: 1 << 16
 MAX_LOCALS :: 1 << 16
 MAX_PARAMETERS :: ALL_RESULTS - 1
 MAX_UPVALUES :: 256
+MAX_CLASS_DEPTH :: 255
 MAX_ELEMENTS :: int(max(u16))
 MAX_RESULTS :: ALL_RESULTS - 1
 

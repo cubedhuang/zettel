@@ -4,22 +4,45 @@ package common
 
 // A module is a compiled file. A file is the body of a class.
 Module :: struct {
+	// The file's class body.
 	main:         Chunk,
 	functions:    []Function,
-	statics:      Static_Names,
+	// The file's class is first, and the classes it declares follow.
+	classes:      []Class,
 	// Bytes of every chunk's string constants.
 	string_bytes: []u8,
 }
 
 Function :: struct {
+	kind:          Function_Kind,
 	// Index into `Module.string_bytes`.
 	name:          Constant_String,
-	// Doesn't count a rest parameter.
+	// Index into `Module.classes`. The class whose statics the function uses.
+	class:         u32,
+	// Doesn't count a rest parameter, or the `self` parameter of a constructor.
 	arity:         int,
 	// Whether the last parameter collects the remaining arguments into an array.
 	variadic:      bool,
 	upvalue_count: int,
 	chunk:         Chunk,
+}
+
+Function_Kind :: enum u8 {
+	Function,
+	// Calling it makes a new instance of its class, which it gets as its first parameter and
+	// returns.
+	Constructor,
+	// The body of a class declared in another class. It's called once, when the declaration runs.
+	Class_Body,
+}
+
+// A class declared in a module.
+Class :: struct {
+	// Index into `Module.string_bytes`. Empty for the file's class, which is named after the file.
+	name:    Constant_String,
+	// Index into `Module.classes` of the class it's declared in. Unused for the file's class.
+	outer:   u32,
+	statics: Static_Names,
 }
 
 Chunk :: struct {
@@ -35,10 +58,16 @@ Constant :: union {
 	f64,
 	Constant_String,
 	Constant_Function,
+	Constant_Class,
 }
 
 Constant_Function :: struct {
 	// Index into `Module.functions`.
+	index: u32,
+}
+
+Constant_Class :: struct {
+	// Index into `Module.classes`.
 	index: u32,
 }
 
@@ -59,7 +88,8 @@ module_destroy :: proc(module: ^Module) {
 	chunk_destroy(&module.main)
 	for &function in module.functions do chunk_destroy(&function.chunk)
 	delete(module.functions)
-	static_names_destroy(&module.statics)
+	for &class in module.classes do static_names_destroy(&class.statics)
+	delete(module.classes)
 	delete(module.string_bytes)
 }
 
@@ -80,6 +110,10 @@ constant_string :: proc(module: Module, s: Constant_String) -> string {
 
 function_name :: proc(module: Module, function: Function) -> string {
 	return constant_string(module, function.name)
+}
+
+class_name :: proc(module: Module, class: Class) -> string {
+	return constant_string(module, class.name)
 }
 
 static_count :: proc(names: Static_Names) -> int {

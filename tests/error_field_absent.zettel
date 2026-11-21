@@ -1,0 +1,11 @@
+// another instance of the class has the field, but this one doesn't
+class Pair {
+    constructor init(self, has_a) {
+        if has_a { self.a = 1 }
+        self.b = 2
+    }
+}
+Pair.init(true)
+p := Pair.init(false)
+echo p.b // expect: 2
+echo p.a // error: Pair has no field 'a'

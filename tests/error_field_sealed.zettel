@@ -1,0 +1,8 @@
+class Point {
+    constructor init(self) {
+        self.x = 1
+    }
+}
+p := Point.init()
+p.x = 2
+p.y = 3 // error: Point has no field 'y', and fields can only be added by its constructor

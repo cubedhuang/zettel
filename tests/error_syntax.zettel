@@ -28,6 +28,12 @@ else { }      // error: expected statement, got 'else'
 // indexing needs an index, and arrays need their closing bracket
 empty_index := []
 echo empty_index[] // error: expected expression, got ']'
+// a property needs a name
+echo empty_index.0 // error: expected an identifier, got a number
+
+// a constructor needs a parameter for the new instance
+constructor no_self() {}     // error: a constructor needs a first parameter for the new instance, like 'self'
+constructor rest_self(..r) {} // error: a constructor needs a first parameter for the new instance, like 'self'
 echo [1, 2;        // error: expected ']', got ';'
 
 // a rest parameter is last, and spreading only happens in lists

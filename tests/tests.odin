@@ -2,9 +2,11 @@
 //
 //     echo 1 + 2  // expect: 3
 //     echo z      // error: 'z' is not declared
+//     x := 1      // note: 'x' was first declared here
 //
-// `expect` comments are the output lines in order. `error` comments are the diagnostics, each
-// reported on the line of its comment.
+// `expect` comments are the output lines in order. `error` and `note` comments are the diagnostics,
+// each reported on the line of its comment. A note belongs to whichever error it follows when
+// diagnostics are ordered by line.
 package zettel_tests
 
 import "../common"
@@ -19,10 +21,12 @@ import "core:testing"
 
 EXPECT :: "// expect: "
 ERROR :: "// error: "
+NOTE :: "// note: "
 
 Diagnostic :: struct {
 	line:    int,
 	message: string,
+	note:    bool,
 }
 
 @(test)
@@ -60,7 +64,9 @@ run_file :: proc(t: ^testing.T, path, name: string) {
 		if i := strings.index(line, EXPECT); i >= 0 {
 			append(&expected_output, line[i + len(EXPECT):])
 		} else if i := strings.index(line, ERROR); i >= 0 {
-			append(&expected_errors, Diagnostic{line_number + 1, line[i + len(ERROR):]})
+			append(&expected_errors, Diagnostic{line_number + 1, line[i + len(ERROR):], false})
+		} else if i := strings.index(line, NOTE); i >= 0 {
+			append(&expected_errors, Diagnostic{line_number + 1, line[i + len(NOTE):], true})
 		}
 	}
 
@@ -68,6 +74,10 @@ run_file :: proc(t: ^testing.T, path, name: string) {
 	defer strings.builder_destroy(&output)
 	actual_errors := run(&source, strings.to_writer(&output))
 	defer delete(actual_errors)
+	// notes come right after their errors, but can be on earlier lines
+	slice.stable_sort_by(actual_errors[:], proc(a, b: Diagnostic) -> bool {
+		return a.line < b.line
+	})
 
 	actual_output := strings.split_lines(strings.to_string(output))
 	defer delete(actual_output)
@@ -107,6 +117,7 @@ run :: proc(source: ^common.Source, out: io.Writer) -> (errors: [dynamic]Diagnos
 				Diagnostic {
 					line_of(source, compiler.error_span(ast, error)),
 					compiler.error_message(ast, error),
+					false,
 				},
 			)
 		}
@@ -121,8 +132,12 @@ run :: proc(source: ^common.Source, out: io.Writer) -> (errors: [dynamic]Diagnos
 				Diagnostic {
 					line_of(source, compiler.error_span(ast, error)),
 					compiler.error_message(ast, error),
+					false,
 				},
 			)
+			for note in compiler.error_notes(ast, error) {
+				append(&errors, Diagnostic{line_of(source, note.span), note.message, true})
+			}
 		}
 		delete(compile_errors)
 		return
@@ -136,7 +151,7 @@ run :: proc(source: ^common.Source, out: io.Writer) -> (errors: [dynamic]Diagnos
 		error_source := &vm.sources[runtime_error.source]
 		append(
 			&errors,
-			Diagnostic{line_of(error_source, runtime_error.span), runtime_error.message},
+			Diagnostic{line_of(error_source, runtime_error.span), runtime_error.message, false},
 		)
 	}
 	return

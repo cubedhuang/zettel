@@ -92,6 +92,8 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 //       / KEYWORD_BREAK IDENTIFIER? SEMI
 //       / KEYWORD_CONTINUE IDENTIFIER? SEMI
 //       / FnDecl
+//       / ConstructorDecl
+//       / ClassDecl
 //       / KEYWORD_RETURN Exprs? SEMI
 //       / SimpleStmt SEMI
 //
@@ -111,8 +113,10 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		node = add_node(p, {tag = tag, main_token = keyword, data = {token = label}})
 		expect_stmt_end(p) or_return
 		return node, true
-	case .Keyword_Fn:
+	case .Keyword_Fn, .Keyword_Constructor:
 		return parse_fn_decl(p)
+	case .Keyword_Class:
+		return parse_class_decl(p)
 	case .Keyword_Return:
 		keyword := advance(p)
 		values: Exprs = Node_Index(0)
@@ -183,12 +187,16 @@ parse_labeled :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 
 // FnDecl <- KEYWORD_FN IDENTIFIER PAREN_OPEN Params PAREN_CLOSE Block
 //
+// ConstructorDecl <- KEYWORD_CONSTRUCTOR IDENTIFIER PAREN_OPEN IDENTIFIER (COMMA Params)? PAREN_CLOSE
+//                    Block
+//
 // Params <- (Param (COMMA Param)* COMMA?)?
 //
 // Param <- DOT_DOT? IDENTIFIER
 parse_fn_decl :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
-	fn_token := expect(p, .Keyword_Fn) or_return
-	expect(p, .Identifier) or_return
+	tag: Node_Tag = .Constructor_Decl if peek_tag(p) == .Keyword_Constructor else .Fn_Decl
+	keyword := advance(p)
+	name := expect(p, .Identifier) or_return
 	expect(p, .Paren_Open) or_return
 
 	scratch_top := len(p.scratch)
@@ -216,19 +224,29 @@ parse_fn_decl :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		}
 	}
 	p.depth -= 1
-	if len(p.scratch) - scratch_top > common.MAX_PARAMETERS {
+	params := p.scratch[scratch_top:]
+	if len(params) > common.MAX_PARAMETERS {
 		add_error(p, {tag = .Too_Many_Parameters})
+		return
+	}
+	if tag == .Constructor_Decl && (len(params) == 0 || p.nodes[params[0]].tag == .Rest_Param) {
+		add_error(p, {tag = .Constructor_Without_Self, token = name})
 		return
 	}
 	expect(p, .Paren_Close) or_return
 
-	params := add_extra(p, make_range(p, p.scratch[scratch_top:]))
+	range := add_extra(p, make_range(p, params))
 	body := parse_block(p) or_return
-	return add_node(
-			p,
-			{tag = .Fn_Decl, main_token = fn_token, data = {node_and_extra = {body, params}}},
-		),
+	return add_node(p, {tag = tag, main_token = keyword, data = {node_and_extra = {body, range}}}),
 		true
+}
+
+// ClassDecl <- KEYWORD_CLASS IDENTIFIER BRACE_OPEN ClassBody BRACE_CLOSE
+parse_class_decl :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	keyword := expect(p, .Keyword_Class) or_return
+	expect(p, .Identifier) or_return
+	body := parse_block(p) or_return
+	return add_node(p, {tag = .Class_Decl, main_token = keyword, data = {node = body}}), true
 }
 
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE
@@ -648,11 +666,13 @@ parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	return add_node(p, {tag = tag, main_token = operator, data = {node = operand}}), true
 }
 
-// Postfix <- Primary (Call / Index)*
+// Postfix <- Primary (Call / Index / Property)*
 //
 // Call <- PAREN_OPEN ExprList PAREN_CLOSE
 //
 // Index <- BRACKET_OPEN Expr BRACKET_CLOSE
+//
+// Property <- DOT IDENTIFIER
 parse_postfix :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	node = parse_primary(p) or_return
 	for {
@@ -670,6 +690,10 @@ parse_postfix :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 				p,
 				{tag = .Index, main_token = open, data = {node_and_node = {node, index}}},
 			)
+		case .Dot:
+			advance(p)
+			name := expect(p, .Identifier) or_return
+			node = add_node(p, {tag = .Property, main_token = name, data = {node = node}})
 		case:
 			return node, true
 		}

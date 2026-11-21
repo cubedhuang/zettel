@@ -46,6 +46,7 @@ Token_Tag :: enum u8 {
 	Newline,
 	Colon,
 	Comma,
+	Dot,
 	Dot_Dot,
 	Paren_Open,
 	Paren_Close,
@@ -114,6 +115,7 @@ token_lexemes := #partial [Token_Tag]string {
 	.Newline             = "\n",
 	.Colon               = ":",
 	.Comma               = ",",
+	.Dot                 = ".",
 	.Dot_Dot             = "..",
 	.Paren_Open          = "(",
 	.Paren_Close         = ")",
@@ -181,6 +183,7 @@ token_names := [Token_Tag]string {
 	.Newline             = "a newline",
 	.Colon               = "':'",
 	.Comma               = "','",
+	.Dot                 = "'.'",
 	.Dot_Dot             = "'..'",
 	.Paren_Open          = "'('",
 	.Paren_Close         = "')'",
@@ -307,8 +310,7 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	case ',':
 		token.tag = .Comma
 	case '.':
-		// a single '.' stays invalid until there's property access
-		if match(t, '.') do token.tag = .Dot_Dot
+		token.tag = .Dot_Dot if match(t, '.') else .Dot
 	case '(':
 		token.tag = .Paren_Open
 	case ')':

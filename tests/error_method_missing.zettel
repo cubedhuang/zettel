@@ -1,0 +1,4 @@
+class Point {
+    constructor init(self) {}
+}
+Point.init().move() // error: Point has no field or method 'move'

@@ -109,13 +109,26 @@ report_errors :: proc(r: Reporter, source: ^common.Source, ast: compiler.Ast) {
 	defer free_all(context.temp_allocator)
 
 	diagnostics := make([]report.Diagnostic, len(ast.errors), context.temp_allocator)
-	for error, i in ast.errors {
-		diagnostics[i] = {
-			span    = compiler.error_span(ast, error),
-			message = compiler.error_message(ast, error),
+	for error, i in ast.errors do diagnostics[i] = to_diagnostic(ast, error)
+	report_diagnostics(r, source, diagnostics)
+}
+
+// Converts a parse or compile error with its notes. Uses `context.temp_allocator`.
+to_diagnostic :: proc(ast: compiler.Ast, error: $E) -> report.Diagnostic {
+	error_notes := compiler.error_notes(ast, error)
+	notes := make([]report.Diagnostic, len(error_notes), context.temp_allocator)
+	for note, i in error_notes {
+		notes[i] = {
+			severity = .Note,
+			span     = note.span,
+			message  = note.message,
 		}
 	}
-	report_diagnostics(r, source, diagnostics)
+	return {
+		span = compiler.error_span(ast, error),
+		message = compiler.error_message(ast, error),
+		notes = notes,
+	}
 }
 
 compile :: proc(
@@ -139,12 +152,7 @@ compile :: proc(
 	defer delete(errors)
 
 	diagnostics := make([]report.Diagnostic, len(errors), context.temp_allocator)
-	for error, i in errors {
-		diagnostics[i] = {
-			span    = compiler.error_span(ast, error),
-			message = compiler.error_message(ast, error),
-		}
-	}
+	for error, i in errors do diagnostics[i] = to_diagnostic(ast, error)
 	report_diagnostics(r, source, diagnostics)
 	return
 }

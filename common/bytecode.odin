@@ -30,6 +30,7 @@ Op :: enum u8 {
 	Mul,
 	Div,
 	Mod,
+	Mod_Floored,
 	Pow,
 	Bit_And,
 	Bit_Or,

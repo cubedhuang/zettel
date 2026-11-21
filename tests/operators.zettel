@@ -1,10 +1,18 @@
-// % is floored: the result has the sign of the divisor
-echo 7 % 3    // expect: 1
-echo -7 % 3   // expect: 2
-echo 7 % -3   // expect: -2
-echo 7.5 % 2  // expect: 1.5
-echo 1 % 0    // expect: nan
+// % truncates, so the result has the sign of the dividend, like in Odin and C
+echo 7 % 3     // expect: 1
+echo -7 % 3    // expect: -1
+echo 7 % -3    // expect: 1
+echo 7.5 % 2   // expect: 1.5
+echo 1 % 0     // expect: nan
 echo 2 * 5 % 3 // expect: 1
+
+// %% floors, so the result has the sign of the divisor, like Odin's %%
+echo 7 %% 3    // expect: 1
+echo -7 %% 3   // expect: 2
+echo 7 %% -3   // expect: -2
+echo -7 %% -3  // expect: -1
+echo -7.5 %% 2 // expect: 0.5
+echo 6 %% 3    // expect: 0
 
 // ^ is power, right-associative, and binds tighter than * and /
 echo 2 ^ 10    // expect: 1024

@@ -10,6 +10,10 @@ x /= 4
 echo x // expect: 6
 x %= 4
 echo x // expect: 2
+x -= 5
+x %%= 4
+echo x // expect: 1
+x += 1
 x ^= 3
 echo x // expect: 8
 x |= 3

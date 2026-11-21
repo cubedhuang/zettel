@@ -349,6 +349,7 @@ parse_simple_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	     .Star_Eq,
 	     .Slash_Eq,
 	     .Percent_Eq,
+	     .Percent_Percent_Eq,
 	     .Caret_Eq,
 	     .Amp_Eq,
 	     .Pipe_Eq,
@@ -510,7 +511,7 @@ parse_expression :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, 
 // And             and
 // Comparison      == != < <= > >=   (can't be chained)
 // Addition        + - | ~
-// Multiplication  * / % & << >>
+// Multiplication  * / % %% & << >>
 // Power           ^                 (right-associative, tighter than unary operators)
 //
 // Bitwise operators can't be mixed with arithmetic or other bitwise operators without parentheses,
@@ -547,6 +548,8 @@ binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 		return .Div, 5
 	case .Percent:
 		return .Mod, 5
+	case .Percent_Percent:
+		return .Mod_Floored, 5
 	case .Amp:
 		return .Bit_And, 5
 	case .Lt_Lt:
@@ -570,7 +573,7 @@ operator_group :: proc(tag: Node_Tag) -> Operator_Group {
 	#partial switch tag {
 	case .Equal, .Not_Equal, .Less, .Less_Equal, .Greater, .Greater_Equal:
 		return .Comparison
-	case .Add, .Sub, .Mul, .Div, .Mod, .Pow:
+	case .Add, .Sub, .Mul, .Div, .Mod, .Mod_Floored, .Pow:
 		return .Arithmetic
 	case .Bit_And, .Bit_Or, .Bit_Xor, .Shift_Left, .Shift_Right:
 		return .Bitwise

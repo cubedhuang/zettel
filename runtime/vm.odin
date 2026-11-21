@@ -155,6 +155,13 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			if !ok {
 				return runtime_error(vm, chunk, start, "operands must be numbers")
 			}
+			// `math.mod` truncates, like C's `fmod`
+			vm_push(vm, to_value(math.mod(lhs, rhs)))
+		case .Mod_Floored:
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
 			vm_push(vm, to_value(floored_mod(lhs, rhs)))
 		case .Pow:
 			lhs, rhs, ok := pop_numbers(vm)
@@ -545,7 +552,7 @@ as_u32 :: proc(value: Value) -> (result: u32, ok: bool) {
 	return u32(i64(number)), true
 }
 
-// The remainder of flooring division, which has the sign of `rhs`, like in Lua and Python.
+// The remainder of flooring division, which has the sign of `rhs`, like Odin's `%%`.
 floored_mod :: proc(lhs, rhs: f64) -> f64 {
 	remainder := math.mod(lhs, rhs)
 	if remainder != 0 && (remainder < 0) != (rhs < 0) do remainder += rhs

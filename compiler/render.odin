@@ -140,6 +140,7 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 	     .Mul,
 	     .Div,
 	     .Mod,
+	     .Mod_Floored,
 	     .Pow,
 	     .Bit_And,
 	     .Bit_Or,

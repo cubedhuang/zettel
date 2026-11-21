@@ -153,6 +153,7 @@ binary_ops := #partial [Node_Tag]common.Op {
 	.Mul           = .Mul,
 	.Div           = .Div,
 	.Mod           = .Mod,
+	.Mod_Floored   = .Mod_Floored,
 	.Pow           = .Pow,
 	.Bit_And       = .Bit_And,
 	.Bit_Or        = .Bit_Or,
@@ -169,17 +170,18 @@ binary_ops := #partial [Node_Tag]common.Op {
 
 // The instruction for each compound assignment operator.
 compound_ops := #partial [Token_Tag]common.Op {
-	.Plus_Eq    = .Add,
-	.Minus_Eq   = .Sub,
-	.Star_Eq    = .Mul,
-	.Slash_Eq   = .Div,
-	.Percent_Eq = .Mod,
-	.Caret_Eq   = .Pow,
-	.Amp_Eq     = .Bit_And,
-	.Pipe_Eq    = .Bit_Or,
-	.Tilde_Eq   = .Bit_Xor,
-	.Lt_Lt_Eq   = .Shift_Left,
-	.Gt_Gt_Eq   = .Shift_Right,
+	.Plus_Eq            = .Add,
+	.Minus_Eq           = .Sub,
+	.Star_Eq            = .Mul,
+	.Slash_Eq           = .Div,
+	.Percent_Eq         = .Mod,
+	.Percent_Percent_Eq = .Mod_Floored,
+	.Caret_Eq           = .Pow,
+	.Amp_Eq             = .Bit_And,
+	.Pipe_Eq            = .Bit_Or,
+	.Tilde_Eq           = .Bit_Xor,
+	.Lt_Lt_Eq           = .Shift_Left,
+	.Gt_Gt_Eq           = .Shift_Right,
 }
 
 // `statics` are the names of statics declared by earlier compilations of the same class, such as
@@ -693,6 +695,7 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	     .Mul,
 	     .Div,
 	     .Mod,
+	     .Mod_Floored,
 	     .Pow,
 	     .Bit_And,
 	     .Bit_Or,

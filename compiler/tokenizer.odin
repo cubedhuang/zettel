@@ -23,6 +23,7 @@ Token_Tag :: enum u8 {
 	Star,
 	Slash,
 	Percent,
+	Percent_Percent,
 	Caret,
 	Amp,
 	Pipe,
@@ -34,6 +35,7 @@ Token_Tag :: enum u8 {
 	Star_Eq,
 	Slash_Eq,
 	Percent_Eq,
+	Percent_Percent_Eq,
 	Caret_Eq,
 	Amp_Eq,
 	Pipe_Eq,
@@ -89,6 +91,7 @@ token_lexemes := #partial [Token_Tag]string {
 	.Star                = "*",
 	.Slash               = "/",
 	.Percent             = "%",
+	.Percent_Percent     = "%%",
 	.Caret               = "^",
 	.Amp                 = "&",
 	.Pipe                = "|",
@@ -100,6 +103,7 @@ token_lexemes := #partial [Token_Tag]string {
 	.Star_Eq             = "*=",
 	.Slash_Eq            = "/=",
 	.Percent_Eq          = "%=",
+	.Percent_Percent_Eq  = "%%=",
 	.Caret_Eq            = "^=",
 	.Amp_Eq              = "&=",
 	.Pipe_Eq             = "|=",
@@ -154,6 +158,7 @@ token_names := [Token_Tag]string {
 	.Star                = "'*'",
 	.Slash               = "'/'",
 	.Percent             = "'%'",
+	.Percent_Percent     = "'%%'",
 	.Caret               = "'^'",
 	.Amp                 = "'&'",
 	.Pipe                = "'|'",
@@ -165,6 +170,7 @@ token_names := [Token_Tag]string {
 	.Star_Eq             = "'*='",
 	.Slash_Eq            = "'/='",
 	.Percent_Eq          = "'%='",
+	.Percent_Percent_Eq  = "'%%='",
 	.Caret_Eq            = "'^='",
 	.Amp_Eq              = "'&='",
 	.Pipe_Eq             = "'|='",
@@ -281,7 +287,11 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	case '/':
 		token.tag = .Slash_Eq if match(t, '=') else .Slash
 	case '%':
-		token.tag = .Percent_Eq if match(t, '=') else .Percent
+		if match(t, '%') {
+			token.tag = .Percent_Percent_Eq if match(t, '=') else .Percent_Percent
+		} else {
+			token.tag = .Percent_Eq if match(t, '=') else .Percent
+		}
 	case '^':
 		token.tag = .Caret_Eq if match(t, '=') else .Caret
 	case '&':

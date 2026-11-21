@@ -203,8 +203,10 @@ Node_Tag :: enum u8 {
 	Mul,
 	// `lhs / rhs`
 	Div,
-	// `lhs % rhs`
+	// `lhs % rhs`, whose result has the sign of `lhs` (truncated).
 	Mod,
+	// `lhs %% rhs`, whose result has the sign of `rhs` (floored).
+	Mod_Floored,
 	// `lhs ^ rhs`
 	Pow,
 	// `lhs & rhs`
@@ -521,6 +523,7 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Mul,
 		     .Div,
 		     .Mod,
+		     .Mod_Floored,
 		     .Pow,
 		     .Bit_And,
 		     .Bit_Or,
@@ -614,6 +617,7 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Mul,
 		     .Div,
 		     .Mod,
+		     .Mod_Floored,
 		     .Pow,
 		     .Bit_And,
 		     .Bit_Or,

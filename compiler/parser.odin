@@ -169,7 +169,11 @@ parse_labeled :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	return add_node(p, {tag = .Labeled, main_token = label, data = {node = statement}}), true
 }
 
-// FnDecl <- KEYWORD_FN IDENTIFIER PAREN_OPEN (IDENTIFIER (COMMA IDENTIFIER)* COMMA?)? PAREN_CLOSE Block
+// FnDecl <- KEYWORD_FN IDENTIFIER PAREN_OPEN Params PAREN_CLOSE Block
+//
+// Params <- (Param (COMMA Param)* COMMA?)?
+//
+// Param <- DOT_DOT? IDENTIFIER
 parse_fn_decl :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	fn_token := expect(p, .Keyword_Fn) or_return
 	expect(p, .Identifier) or_return
@@ -180,14 +184,24 @@ parse_fn_decl :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 
 	p.depth += 1
 	for peek_tag(p) != .Paren_Close {
+		tag: Node_Tag = .Identifier
+		if peek_tag(p) == .Dot_Dot {
+			tag = .Rest_Param
+			advance(p)
+		}
 		identifier, identifier_ok := expect(p, .Identifier)
 		if !identifier_ok {
 			p.depth -= 1
 			return
 		}
-		append(&p.scratch, add_node(p, {tag = .Identifier, main_token = identifier}))
+		append(&p.scratch, add_node(p, {tag = tag, main_token = identifier}))
 		if peek_tag(p) != .Comma do break
 		advance(p)
+		if tag == .Rest_Param && peek_tag(p) != .Paren_Close {
+			add_error(p, {tag = .Rest_Param_Not_Last})
+			p.depth -= 1
+			return
+		}
 	}
 	p.depth -= 1
 	if len(p.scratch) - scratch_top > common.MAX_PARAMETERS {
@@ -557,14 +571,23 @@ parse_call :: proc(p: ^Parser, callee: Node_Index) -> (node: Node_Index, ok: boo
 		true
 }
 
-// ExprList <- (Expr (COMMA Expr)* COMMA?)?
+// ExprList <- (Item (COMMA Item)* COMMA?)?
 //
-// Appends the expressions to `p.scratch`. Newlines are skipped until `close`, which isn't consumed.
+// Item <- DOT_DOT? Expr
+//
+// Appends the items to `p.scratch`. Newlines are skipped until `close`, which isn't consumed.
 parse_expr_list :: proc(p: ^Parser, close: Token_Tag) -> (ok: bool) {
 	p.depth += 1
 	defer p.depth -= 1
 	for peek_tag(p) != close {
-		append(&p.scratch, parse_expression(p) or_return)
+		if peek_tag(p) == .Dot_Dot {
+			dot_dot := advance(p)
+			operand := parse_expression(p) or_return
+			spread := add_node(p, {tag = .Spread, main_token = dot_dot, data = {node = operand}})
+			append(&p.scratch, spread)
+		} else {
+			append(&p.scratch, parse_expression(p) or_return)
+		}
 		if peek_tag(p) != .Comma do break
 		advance(p)
 	}

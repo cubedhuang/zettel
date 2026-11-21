@@ -35,7 +35,10 @@ Obj_Function :: struct {
 	using obj:     Obj,
 	// nil for a class body.
 	name:          ^Obj_String,
+	// Doesn't count a rest parameter.
 	arity:         int,
+	// Whether extra arguments are collected into an array for the last parameter.
+	variadic:      bool,
 	upvalue_count: int,
 	chunk:         Chunk,
 	// The class whose statics the function uses.
@@ -69,8 +72,10 @@ Obj_Array :: struct {
 Obj_Native :: struct {
 	using obj: Obj,
 	name:      ^Obj_String,
-	// `VARIADIC` for any number of arguments.
+	// The minimum argument count when variadic.
 	arity:     int,
+	// Whether it takes any number of arguments after `arity`. They aren't collected into an array.
+	variadic:  bool,
 	procedure: Native_Proc,
 }
 
@@ -131,6 +136,7 @@ new_native :: proc(vm: ^Vm, name: ^Obj_String, native: Native) -> ^Obj_Native {
 	obj := new_obj(vm, Obj_Native)
 	obj.name = name
 	obj.arity = native.arity
+	obj.variadic = native.variadic
 	obj.procedure = native.procedure
 	return obj
 }

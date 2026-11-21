@@ -107,6 +107,13 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_string(w, token_text(ast, node.main_token))
 	case .Identifier:
 		io.write_string(w, token_text(ast, node.main_token))
+	case .Rest_Param:
+		io.write_string(w, "..")
+		io.write_string(w, token_text(ast, node.main_token))
+	case .Spread:
+		io.write_string(w, "(.. ")
+		render_node(w, ast, node.data.node, indent)
+		io.write_byte(w, ')')
 	case .Grouped:
 		io.write_string(w, "(group ")
 		render_node(w, ast, node.data.token_and_node.node, indent)

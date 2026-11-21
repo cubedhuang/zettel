@@ -3,21 +3,20 @@ package zettel_runtime
 import "../common"
 import "core:io"
 
-VARIADIC :: -1
-
 // A non-empty `error` is a runtime error and may use `context.temp_allocator`.
 Native_Proc :: #type proc(vm: ^Vm, args: []Value) -> (result: Value, error: string)
 
 Native :: struct {
 	procedure: Native_Proc,
 	arity:     int,
+	variadic:  bool,
 }
 
 builtin_natives := [common.Builtin]Native {
-	.Print = {native_print, VARIADIC},
-	.Len   = {native_len, 1},
-	.Push  = {native_push, 2},
-	.Pop   = {native_pop, 1},
+	.Print = {native_print, 0, true},
+	.Len   = {native_len, 1, false},
+	.Push  = {native_push, 2, false},
+	.Pop   = {native_pop, 1, false},
 }
 
 native_print :: proc(vm: ^Vm, args: []Value) -> (result: Value, error: string) {

@@ -1,0 +1,2 @@
+fn at_least_one(first, ..rest) {}
+at_least_one() // error: expected at least 1 argument, got 0

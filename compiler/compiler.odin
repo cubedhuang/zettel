@@ -482,6 +482,7 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 	name := declared_name(c.ast, index)
 	name_span := token_span(c.ast, c.ast.nodes[index].main_token + 1)
 	params, body := fn_parts(c.ast, index)
+	variadic := fn_is_variadic(c.ast, params)
 
 	is_static := in_static_scope(c)
 	if !is_static do declare_local(c, name, index)
@@ -522,7 +523,8 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 		&c.functions,
 		common.Function {
 			name = add_string_bytes(c, name),
-			arity = len(params),
+			arity = len(params) - int(variadic),
+			variadic = variadic,
 			upvalue_count = upvalue_count,
 			chunk = finish_chunk(&chunk),
 		},
@@ -586,9 +588,10 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		emit(c, .Echo, span)
 	case .Array_Literal:
 		elements := array_elements(c.ast, index)
-		for element in elements do compile_expression(c, element)
-		emit(c, .Array, span)
-		emit_u16(c, len(elements), span)
+		if !compile_list(c, elements, span) {
+			emit(c, .Array, span)
+			emit_u16(c, len(elements), span)
+		}
 	case .Index:
 		compile_expression(c, node.data.node_and_node.lhs)
 		compile_expression(c, node.data.node_and_node.rhs)
@@ -596,9 +599,12 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Call_One, .Call:
 		callee, args := call_parts(c.ast, index)
 		compile_expression(c, callee)
-		for arg in args do compile_expression(c, arg)
-		emit(c, .Call, span)
-		emit_byte(c, u8(len(args)), span)
+		if compile_list(c, args, span) {
+			emit(c, .Call_Spread, span)
+		} else {
+			emit(c, .Call, span)
+			emit_byte(c, u8(len(args)), span)
+		}
 	case .And, .Or:
 		compile_expression(c, node.data.node_and_node.lhs)
 		jump := emit_jump(c, .Jump_If_False if node.tag == .And else .Jump_If_True, span)
@@ -612,6 +618,36 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case:
 		unreachable()
 	}
+}
+
+// Pushes the arguments or elements in `items`. If any is a `Spread`, they're collected into one
+// array instead, and `spread` is true. `span` is the list's source.
+compile_list :: proc(c: ^Compiler, items: []Node_Index, span: common.Span) -> (spread: bool) {
+	first_spread := -1
+	for item, i in items {
+		if c.ast.nodes[item].tag == .Spread {
+			first_spread = i
+			break
+		}
+	}
+	if first_spread < 0 {
+		for item in items do compile_expression(c, item)
+		return false
+	}
+
+	for item in items[:first_spread] do compile_expression(c, item)
+	emit(c, .Array, span)
+	emit_u16(c, first_spread, span)
+	for item in items[first_spread:] {
+		if c.ast.nodes[item].tag == .Spread {
+			compile_expression(c, c.ast.nodes[item].data.node)
+			emit(c, .Array_Extend, node_span(c.ast, item))
+		} else {
+			compile_expression(c, item)
+			emit(c, .Array_Push, span)
+		}
+	}
+	return true
 }
 
 begin_scope :: proc(c: ^Compiler) {

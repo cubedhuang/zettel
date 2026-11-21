@@ -103,7 +103,7 @@ Node_Tag :: enum u8 {
 	// `fn name(params) body`.
 	//
 	// The `data` field is `node_and_extra`. The node is the `Block` and the extra points at a
-	// `Node_Range` of `Identifier` parameters.
+	// `Node_Range` of `Identifier` parameters, where the last may be a `Rest_Param`.
 	//
 	// The `main_token` field is the `fn`, and the name is the token after it.
 	Fn_Decl,
@@ -128,6 +128,16 @@ Node_Tag :: enum u8 {
 	False_Literal,
 	// The `data` field is unused.
 	Identifier,
+	// `..name`, the last parameter of a variadic function. The `data` field is unused.
+	//
+	// The `main_token` field is the name, after the `..`.
+	Rest_Param,
+	// `..node`, spreading an array into arguments or array elements.
+	//
+	// The `data` field is `node`.
+	//
+	// The `main_token` field is the `..`.
+	Spread,
 	// `(node)`.
 	//
 	// The `data` field is `token_and_node`. The token is the `)` and the node is the sub-expression.
@@ -259,6 +269,7 @@ Parse_Error_Tag :: enum u8 {
 	Too_Many_Parameters,
 	Too_Many_Arguments,
 	Too_Many_Elements,
+	Rest_Param_Not_Last,
 	Else_On_New_Line,
 }
 
@@ -313,6 +324,11 @@ fn_parts :: proc(ast: Ast, index: Node_Index) -> (params: []Node_Index, body: No
 	assert(node.tag == .Fn_Decl, "tag of fn_parts node must be Fn_Decl")
 	range := extra_data(ast, node.data.node_and_extra.extra, Node_Range)
 	return extra_data_slice(ast, range, Node_Index), node.data.node_and_extra.node
+}
+
+// Whether a `Fn_Decl` ends with a `Rest_Param`.
+fn_is_variadic :: proc(ast: Ast, params: []Node_Index) -> bool {
+	return len(params) > 0 && ast.nodes[params[len(params) - 1]].tag == .Rest_Param
 }
 
 // For `Call_One` and `Call`.
@@ -441,8 +457,11 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Negate,
 		     .Not,
 		     .Echo,
-		     .Array_Literal:
+		     .Array_Literal,
+		     .Spread:
 			return node.main_token
+		case .Rest_Param:
+			return node.main_token - 1
 		case .Assign,
 		     .Decl,
 		     .Add,
@@ -521,8 +540,10 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			return node.main_token
 		case .Grouped:
 			return node.data.token_and_node.token
-		case .Negate, .Not, .Echo:
+		case .Negate, .Not, .Echo, .Spread:
 			index = node.data.node
+		case .Rest_Param:
+			return node.main_token
 		case .Assign,
 		     .Decl,
 		     .Add,
@@ -578,6 +599,8 @@ parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 		return fmt.tprintf("more than %v arguments", common.MAX_PARAMETERS)
 	case .Too_Many_Elements:
 		return fmt.tprintf("more than %v elements", common.MAX_ELEMENTS)
+	case .Rest_Param_Not_Last:
+		return "a rest parameter must be the last parameter"
 	case .Else_On_New_Line:
 		return "'else' must be on the same line as the '}' before it"
 	}

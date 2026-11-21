@@ -12,6 +12,10 @@ Op :: enum u8 {
 	False,
 	// Pops the operand's number of values and pushes an array of them, in order.
 	Array,
+	// Pops a value and appends it to the array below it, which stays on the stack.
+	Array_Push,
+	// Pops an array and appends its elements to the array below it, which stays on the stack.
+	Array_Extend,
 	// Unary
 	//
 	// Pops one value from the stack.
@@ -67,6 +71,8 @@ Op :: enum u8 {
 	// Calls the value below its arguments, which are on top of the stack. The operand is the
 	// argument count.
 	Call,
+	// Like `Call`, but the arguments are an array on top of the stack, from spreading.
+	Call_Spread,
 	// Pops the return value and the frame, including the callee, then pushes the return value.
 	Return,
 	//

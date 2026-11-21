@@ -90,10 +90,16 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 		case .Array:
 			count := int(common.read_u16(chunk.code, ip))
 			ip += 2
-			items := make([dynamic]Value, count)
-			copy(items[:], vm.stack[len(vm.stack) - count:])
-			resize(&vm.stack, len(vm.stack) - count)
-			vm_push(vm, to_value(new_array(vm, items)))
+			vm_push(vm, to_value(pop_array(vm, count)))
+		case .Array_Push:
+			item := vm_pop(vm)
+			array := (^Obj_Array)(to_obj(vm_peek(vm)))
+			append(&array.items, item)
+		case .Array_Extend:
+			spread, is_array := as_array(vm_pop(vm))
+			if !is_array do return runtime_error(vm, chunk, start, "can only spread arrays")
+			array := (^Obj_Array)(to_obj(vm_peek(vm)))
+			append(&array.items, ..spread.items[:])
 		case .Negate:
 			operand, is_number := as_number(vm_pop(vm))
 			if !is_number {
@@ -220,42 +226,29 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 		case .Set_Local:
 			vm.stack[base + int(common.read_u16(chunk.code, ip))] = vm_pop(vm)
 			ip += 2
-		case .Call:
-			arg_count := int(chunk.code[ip])
-			ip += 1
-			callee, is_obj := as_obj(vm.stack[len(vm.stack) - arg_count - 1])
-			if !is_obj || (callee.tag != .Closure && callee.tag != .Native) {
-				return runtime_error(vm, chunk, start, "can only call functions")
-			}
-			if callee.tag == .Native {
-				native := (^Obj_Native)(callee)
-				if native.arity != VARIADIC && arg_count != native.arity {
-					return runtime_error(vm, chunk, start, arity_message(native.arity, arg_count))
-				}
-				args_start := len(vm.stack) - arg_count
-				result, error := native.procedure(vm, vm.stack[args_start:])
-				if error != "" do return runtime_error(vm, chunk, start, error)
-				resize(&vm.stack, args_start - 1)
-				vm_push(vm, result)
-				break
-			}
-
-			closure := (^Obj_Closure)(callee)
-			function := closure.function
-			if arg_count != function.arity {
-				return runtime_error(vm, chunk, start, arity_message(function.arity, arg_count))
-			}
-			if len(vm.frames) >= MAX_FRAMES {
-				return runtime_error(vm, chunk, start, "stack overflow")
+		case .Call, .Call_Spread:
+			arg_count: int
+			if op == .Call {
+				arg_count = int(chunk.code[ip])
+				ip += 1
+			} else {
+				// the compiler made this array, so it can't be anything else
+				args := (^Obj_Array)(to_obj(vm_pop(vm)))
+				append(&vm.stack, ..args.items[:])
+				arg_count = len(args.items)
 			}
 
 			vm.frames[len(vm.frames) - 1].ip = ip
-			base = len(vm.stack) - arg_count
-			append(&vm.frames, Frame{closure = closure, base = base})
-			chunk = function.chunk
-			statics = function.class.statics[:]
-			upvalues = closure.upvalues
-			ip = 0
+			if message := call_value(vm, arg_count); message != "" {
+				return runtime_error(vm, chunk, start, message)
+			}
+			// a function call pushed a frame, and a native call left the same one
+			frame := vm.frames[len(vm.frames) - 1]
+			chunk = frame.closure.function.chunk
+			statics = frame.closure.function.class.statics[:]
+			upvalues = frame.closure.upvalues
+			base = frame.base
+			ip = frame.ip
 		case .Closure:
 			function := (^Obj_Function)(to_obj(chunk.constants[common.read_u16(chunk.code, ip)]))
 			ip += 2
@@ -312,14 +305,61 @@ runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runti
 	return {message = message, span = chunk.spans[ip], source = chunk.source}, false
 }
 
+// Calls the value below the top `arg_count` values. For a function, this pushes its frame.
+// An error message may use `context.temp_allocator`.
+call_value :: proc(vm: ^Vm, arg_count: int) -> (error: string) {
+	callee_slot := len(vm.stack) - arg_count - 1
+	callee, is_obj := as_obj(vm.stack[callee_slot])
+	if !is_obj do return "can only call functions"
+
+	#partial switch callee.tag {
+	case .Native:
+		native := (^Obj_Native)(callee)
+		if !arity_matches(native.arity, native.variadic, arg_count) {
+			return arity_message(native.arity, native.variadic, arg_count)
+		}
+		result, native_error := native.procedure(vm, vm.stack[callee_slot + 1:])
+		if native_error != "" do return native_error
+		resize(&vm.stack, callee_slot)
+		vm_push(vm, result)
+		return ""
+	case .Closure:
+		closure := (^Obj_Closure)(callee)
+		function := closure.function
+		if !arity_matches(function.arity, function.variadic, arg_count) {
+			return arity_message(function.arity, function.variadic, arg_count)
+		}
+		if len(vm.frames) >= MAX_FRAMES do return "stack overflow"
+		if function.variadic {
+			vm_push(vm, to_value(pop_array(vm, arg_count - function.arity)))
+		}
+		append(&vm.frames, Frame{closure = closure, base = callee_slot + 1})
+		return ""
+	}
+	return "can only call functions"
+}
+
+arity_matches :: proc(arity: int, variadic: bool, arg_count: int) -> bool {
+	return arg_count >= arity if variadic else arg_count == arity
+}
+
 // Uses `context.temp_allocator`.
-arity_message :: proc(expected, got: int) -> string {
+arity_message :: proc(arity: int, variadic: bool, got: int) -> string {
 	return fmt.tprintf(
-		"expected %v argument%v, got %v",
-		expected,
-		"" if expected == 1 else "s",
+		"expected %v%v argument%v, got %v",
+		"at least " if variadic else "",
+		arity,
+		"" if arity == 1 else "s",
 		got,
 	)
+}
+
+// Pops the top `count` values into a new array, in order.
+pop_array :: proc(vm: ^Vm, count: int) -> ^Obj_Array {
+	items := make([dynamic]Value, count)
+	copy(items[:], vm.stack[len(vm.stack) - count:])
+	resize(&vm.stack, len(vm.stack) - count)
+	return new_array(vm, items)
 }
 
 // Returns the open upvalue for the stack slot or creates if needed.
@@ -368,7 +408,11 @@ array_index :: proc(
 	if !is_number || number != math.trunc(number) do return nil, 0, "index must be an integer"
 	// compare as floats because huge numbers and infinities don't convert to `int`
 	if number < 0 || number >= f64(len(array.items)) {
-		return nil, 0, fmt.tprintf("index %v is out of bounds for length %v", number, len(array.items))
+		return nil, 0, fmt.tprintf(
+			"index %v is out of bounds for length %v",
+			number,
+			len(array.items),
+		)
 	}
 	return array, int(number), ""
 }

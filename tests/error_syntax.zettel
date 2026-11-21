@@ -30,5 +30,10 @@ empty_index := []
 echo empty_index[] // error: expected expression, got ']'
 echo [1, 2;        // error: expected ']', got ';'
 
+// a rest parameter is last, and spreading only happens in lists
+fn rest_first(..a, b) {} // error: a rest parameter must be the last parameter
+fn rest_no_name(..) {}   // error: expected an identifier, got ')'
+spread_alone := ..[1]    // error: expected expression, got '..'
+
 // a trailing operator continues the expression onto the next line
 echo 1 +     // error: expected expression, got end of input

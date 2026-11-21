@@ -43,6 +43,7 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Clo
 	for function, index in module.functions {
 		name := intern_clone(vm, common.function_name(module, function))
 		functions[index] = new_function(vm, class, name, function.arity)
+		functions[index].variadic = function.variadic
 		functions[index].upvalue_count = function.upvalue_count
 	}
 	for function, index in module.functions {

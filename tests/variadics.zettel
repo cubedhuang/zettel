@@ -1,0 +1,42 @@
+// a rest parameter collects the remaining arguments into an array
+fn all(..args) { return args }
+echo all()        // expect: []
+echo all(1, 2, 3) // expect: [1, 2, 3]
+
+// it comes after the fixed parameters
+fn tail(first, ..rest) { return [first, rest] }
+echo tail(1)       // expect: [1, []]
+echo tail(1, 2, 3) // expect: [1, [2, 3]]
+fn trailing_comma(a, ..b,) { return b }
+echo trailing_comma(1, 2) // expect: [2]
+
+// spreading an array passes its elements as arguments
+fn add(a, b) { return a + b }
+pair := [1, 2]
+echo add(..pair)    // expect: 3
+echo add(..[1], 10) // expect: 11
+echo all(0, ..pair, 3, ..pair) // expect: [0, 1, 2, 3, 1, 2]
+print(..["a", "b"]) // expect: a b
+
+// spreading works in array literals too
+echo [0, ..pair, 3] // expect: [0, 1, 2, 3]
+echo [..[], ..[]]   // expect: []
+
+// spreading and collecting make new arrays
+copy := [..pair]
+copy[0] = "changed"
+echo pair // expect: [1, 2]
+fn mutate(..xs) {
+    xs[0] = "changed"
+}
+mutate(..pair)
+echo pair // expect: [1, 2]
+
+// rest parameters are locals that closures can capture
+fn bind(f, ..bound) {
+    fn call(..more) { return f(..bound, ..more) }
+    return call
+}
+echo bind(add, 5)(6)     // expect: 11
+echo bind(all, 1, 2)(3)  // expect: [1, 2, 3]
+echo bind                // expect: <fn bind>

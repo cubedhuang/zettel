@@ -14,7 +14,10 @@ Module :: struct {
 Function :: struct {
 	// Index into `Module.string_bytes`.
 	name:          Constant_String,
+	// Doesn't count a rest parameter.
 	arity:         int,
+	// Whether the last parameter collects the remaining arguments into an array.
+	variadic:      bool,
 	upvalue_count: int,
 	chunk:         Chunk,
 }

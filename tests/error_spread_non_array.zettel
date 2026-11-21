@@ -1,0 +1,2 @@
+fn f(..xs) {}
+f(..nil) // error: can only spread arrays

@@ -8,9 +8,10 @@ disassemble :: proc(w: io.Writer, module: Module) {
 	for function in module.functions {
 		fmt.wprintf(
 			w,
-			"\nfn %s/%v:\n",
+			"\nfn %s/%v%v:\n",
 			function_name(module, function),
 			function.arity,
+			"+" if function.variadic else "",
 			flush = false,
 		)
 		disassemble_chunk(w, module, function.chunk)

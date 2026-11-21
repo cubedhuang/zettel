@@ -2,4 +2,4 @@
 fn bad(a) {
     return -a // error: operand must be a number
 }
-bad("x")
+bad("x") // note: 'bad' was called here

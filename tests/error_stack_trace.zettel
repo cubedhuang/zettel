@@ -1,0 +1,18 @@
+// each call that led to the error gets a note, innermost first
+class Shapes {
+    fn area(shape) {
+        return shape.width * shape.height // error: Square has no field 'width'
+    }
+}
+class Square {
+    constructor init(self, side) {
+        self.side = side
+    }
+}
+total := (shapes) => Shapes.area(shapes[0]) // note: 'area' was called here
+fn summarize(shapes) {
+    return total(shapes) // note: a lambda was called here
+}
+class Report { // note: the body of class 'Report' ran here
+    result := summarize([Square.init(2)]) // note: 'summarize' was called here
+}

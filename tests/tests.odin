@@ -6,7 +6,7 @@
 //
 // `expect` comments are the output lines in order. `error` and `note` comments are the diagnostics,
 // each reported on the line of its comment. A note belongs to whichever error it follows when
-// diagnostics are ordered by line.
+// diagnostics are ordered by line. One line can have several, like `// error: a // note: b`.
 package zettel_tests
 
 import "../common"
@@ -63,10 +63,8 @@ run_file :: proc(t: ^testing.T, path, name: string) {
 		line := common.line_text(&source, line_number)
 		if i := strings.index(line, EXPECT); i >= 0 {
 			append(&expected_output, line[i + len(EXPECT):])
-		} else if i := strings.index(line, ERROR); i >= 0 {
-			append(&expected_errors, Diagnostic{line_number + 1, line[i + len(ERROR):], false})
-		} else if i := strings.index(line, NOTE); i >= 0 {
-			append(&expected_errors, Diagnostic{line_number + 1, line[i + len(NOTE):], true})
+		} else {
+			parse_diagnostics(line, line_number + 1, &expected_errors)
 		}
 	}
 
@@ -100,6 +98,26 @@ run_file :: proc(t: ^testing.T, path, name: string) {
 		expected_errors[:],
 		actual_errors[:],
 	)
+}
+
+// Appends the `error` and `note` comments on a line in order.
+parse_diagnostics :: proc(line: string, line_number: int, diagnostics: ^[dynamic]Diagnostic) {
+	// Returns where the next comment starts and whether it's a note, or -1.
+	next_comment :: proc(text: string) -> (start: int, note: bool) {
+		error_start, note_start := strings.index(text, ERROR), strings.index(text, NOTE)
+		if note_start >= 0 && (error_start < 0 || note_start < error_start) do return note_start, true
+		return error_start, false
+	}
+
+	rest := line
+	start, note := next_comment(rest)
+	for start >= 0 {
+		rest = rest[start + len(NOTE if note else ERROR):]
+		next, next_note := next_comment(rest)
+		message := rest if next < 0 else strings.trim_right_space(rest[:next])
+		append(diagnostics, Diagnostic{line_number, message, note})
+		start, note = next, next_note
+	}
 }
 
 // Messages use `context.temp_allocator`.
@@ -153,6 +171,12 @@ run :: proc(source: ^common.Source, out: io.Writer) -> (errors: [dynamic]Diagnos
 			&errors,
 			Diagnostic{line_of(error_source, runtime_error.span), runtime_error.message, false},
 		)
+		for call in runtime_error.calls {
+			append(
+				&errors,
+				Diagnostic{line_of(&vm.sources[call.source], call.span), call.message, true},
+			)
+		}
 	}
 	return
 }

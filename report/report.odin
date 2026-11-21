@@ -26,11 +26,16 @@ severity_colors := [Severity]Color {
 }
 
 Diagnostic :: struct {
-	severity: Severity,
-	span:     common.Span,
-	message:  string,
+	severity:    Severity,
+	span:        common.Span,
+	// nil for the source given to `render`. A note can be in another source, such as a stack
+	// trace's call in another file.
+	source:      ^common.Source,
+	// Shows only the message, without a location or source.
+	no_location: bool,
+	message:     string,
 	// Shown right after the diagnostic. Their severity is usually `Note`.
-	notes:    []Diagnostic,
+	notes:       []Diagnostic,
 }
 
 Style :: enum u8 {
@@ -85,6 +90,21 @@ render_diagnostic :: proc(
 	diagnostic: Diagnostic,
 	options: Options,
 ) {
+	if diagnostic.no_location {
+		switch options.style {
+		case .Short:
+			set_color(t, severity_colors[diagnostic.severity])
+			fmt.wprintf(t.writer, "%v: ", severity_names[diagnostic.severity], flush = false)
+			set_color(t, .Reset)
+			fmt.wprintf(t.writer, "%v\n", diagnostic.message, flush = false)
+		case .Rich:
+			write_headline(t, diagnostic)
+		}
+		for note in diagnostic.notes do render_diagnostic(t, source, note, options)
+		return
+	}
+	source := diagnostic.source if diagnostic.source != nil else source
+
 	source_end := u32(len(source.text))
 	start := min(diagnostic.span.start, source_end)
 	end := max(start, min(diagnostic.span.end, source_end))
@@ -151,8 +171,7 @@ write_headline :: proc(t: Terminal, diagnostic: Diagnostic) {
 write_location :: proc(t: Terminal, source: ^common.Source, line, column: int) {
 	io.write_string(t.writer, "  ")
 
-	set_color(t, .Bold)
-	set_color(t, .Cyan)
+	set_color(t, .Blue)
 	fmt.wprintf(t.writer, "%v:%v:%v", source.path, line, column, flush = false)
 	set_color(t, .Reset)
 	io.write_byte(t.writer, '\n')

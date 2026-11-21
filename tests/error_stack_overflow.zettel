@@ -1,4 +1,4 @@
 fn forever(n) {
-    return forever(n + 1) // error: stack overflow
+    return forever(n + 1) // error: stack overflow // note: 'forever' was called here (1022 times)
 }
-forever(0)
+forever(0) // note: 'forever' was called here

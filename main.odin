@@ -167,13 +167,34 @@ execute :: proc(
 
 	error, ok := runtime.run(vm, runtime.load(vm, source, module))
 	if !ok {
-		report_diagnostics(
-			r,
-			&vm.sources[error.source],
-			{{span = error.span, message = error.message}},
-		)
+		report_diagnostics(r, &vm.sources[error.source], {runtime_diagnostic(vm, error)})
 	}
 	return ok
+}
+
+// Converts a runtime error with its stack trace. Uses `context.temp_allocator`.
+runtime_diagnostic :: proc(vm: ^runtime.Vm, error: runtime.Runtime_Error) -> report.Diagnostic {
+	notes := make([dynamic]report.Diagnostic, context.temp_allocator)
+	for call in error.calls {
+		append(
+			&notes,
+			report.Diagnostic {
+				severity = .Note,
+				span = call.span,
+				source = &vm.sources[call.source],
+				message = call.message,
+			},
+		)
+	}
+	if error.omitted_calls > 0 {
+		message := fmt.tprintf(
+			"... and %v more call%v",
+			error.omitted_calls,
+			"" if error.omitted_calls == 1 else "s",
+		)
+		append(&notes, report.Diagnostic{severity = .Note, no_location = true, message = message})
+	}
+	return {span = error.span, message = error.message, notes = notes[:]}
 }
 
 set_error_format :: proc(

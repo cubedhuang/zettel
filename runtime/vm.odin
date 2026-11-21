@@ -7,6 +7,8 @@ import "core:math"
 import "core:strings"
 
 MAX_FRAMES :: 1024
+// The most calls that a stack trace shows. Repeated calls from one place count once.
+MAX_CALL_SITES :: 16
 
 Vm :: struct {
 	sources:       [dynamic]common.Source,
@@ -37,10 +39,23 @@ Frame :: struct {
 
 Runtime_Error :: struct {
 	// May use `context.temp_allocator`.
-	message: string,
+	message:       string,
+	span:          common.Span,
+	// Index into `Vm.sources`.
+	source:        int,
+	// The calls that led to the error, innermost first. Uses `context.temp_allocator`.
+	calls:         []Call_Site,
+	// How many more calls there were than `calls` shows.
+	omitted_calls: int,
+}
+
+// Where a function was called, in a stack trace.
+Call_Site :: struct {
 	span:    common.Span,
 	// Index into `Vm.sources`.
 	source:  int,
+	// Like "'f' was called here". Uses `context.temp_allocator`.
+	message: string,
 }
 
 vm_init :: proc(vm: ^Vm, out: io.Writer) {
@@ -445,11 +460,70 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 }
 
 runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runtime_Error, bool) {
+	calls, omitted_calls := stack_trace(vm)
 	// closures can stay alive after the error, for example in the REPL
 	close_upvalues(vm, 0)
 	clear(&vm.stack)
 	clear(&vm.frames)
-	return {message = message, span = chunk.spans[ip], source = chunk.source}, false
+	return {
+			message = message,
+			span = chunk.spans[ip],
+			source = chunk.source,
+			calls = calls,
+			omitted_calls = omitted_calls,
+		},
+		false
+}
+
+// Describes where each function on the stack was called, innermost first. Consecutive calls of the
+// same function from the same place, as in recursion, are described once. Uses
+// `context.temp_allocator`.
+stack_trace :: proc(vm: ^Vm) -> (calls: []Call_Site, omitted: int) {
+	Repeated_Call :: struct {
+		span:   common.Span,
+		source: int,
+		callee: ^Obj_Function,
+		count:  int,
+	}
+	repeated := make([dynamic]Repeated_Call, context.temp_allocator)
+	// the outermost frame is a class body that nothing called
+	for i := len(vm.frames) - 1; i > 0; i -= 1 {
+		caller := vm.frames[i - 1]
+		chunk := caller.closure.function.chunk
+		// the call instruction's last byte is right before the caller's ip
+		call := Repeated_Call {
+			chunk.spans[caller.ip - 1],
+			chunk.source,
+			vm.frames[i].closure.function,
+			1,
+		}
+		if len(repeated) > 0 {
+			last := &repeated[len(repeated) - 1]
+			if last.span == call.span && last.source == call.source && last.callee == call.callee {
+				last.count += 1
+				continue
+			}
+		}
+		append(&repeated, call)
+	}
+
+	shown := min(len(repeated), MAX_CALL_SITES)
+	sites := make([]Call_Site, shown, context.temp_allocator)
+	for call, i in repeated[:shown] {
+		callee := call.callee
+		description: string
+		switch {
+		case callee.kind == .Class_Body:
+			description = fmt.tprintf("the body of class '%v' ran here", callee.name.text)
+		case callee.name == nil:
+			description = "a lambda was called here"
+		case:
+			description = fmt.tprintf("'%v' was called here", callee.name.text)
+		}
+		if call.count > 1 do description = fmt.tprintf("%v (%v times)", description, call.count)
+		sites[i] = {call.span, call.source, description}
+	}
+	return sites, len(repeated) - shown
 }
 
 // Calls the value below the top `arg_count` values, which must return `results` values (or

@@ -7,4 +7,4 @@ class Test {
         print("hello world")
     }
 }
-t := Test.init(1)
+t := Test.init(1) // note: 'init' was called here

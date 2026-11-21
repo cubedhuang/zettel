@@ -247,6 +247,11 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 		case .Echo:
 			write_value(vm.out, vm_peek(vm))
 			io.write_byte(vm.out, '\n')
+		case .Echo_Result:
+			value := vm_peek(vm)
+			if value == NIL do break
+			write_value(vm.out, value)
+			io.write_byte(vm.out, '\n')
 		}
 	}
 }

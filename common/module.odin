@@ -116,6 +116,8 @@ Op :: enum u8 {
 	Pop,
 	// Writes the top value to the output without popping it.
 	Echo,
+	// Like `Echo`, but writes nothing for `nil`; used in the REPL.
+	Echo_Result,
 }
 
 op_operand_size := #partial [Op]int {

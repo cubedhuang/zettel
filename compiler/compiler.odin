@@ -348,7 +348,7 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		compile_expression(c, index)
 		span := node_span(c.ast, index)
 		if c.echo_statements && in_static_scope(c) && node.tag != .Echo {
-			emit(c, .Echo, span)
+			emit(c, .Echo_Result, span)
 		}
 		emit(c, .Pop, span)
 	}

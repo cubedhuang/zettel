@@ -759,7 +759,8 @@ parse_expr_list :: proc(p: ^Parser, close: Token_Tag) -> (ok: bool) {
 //          / KEYWORD_TRUE
 //          / KEYWORD_FALSE
 //          / IDENTIFIER
-//          / PAREN_OPEN Expr PAREN_CLOSE
+//          / Group
+//          / Lambda
 //          / BRACKET_OPEN ExprList BRACKET_CLOSE
 parse_primary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	#partial switch peek_tag(p) {
@@ -793,20 +794,102 @@ parse_primary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	case .Identifier:
 		return add_node(p, {tag = .Identifier, main_token = advance(p)}), true
 	case .Paren_Open:
-		open := advance(p)
-		p.depth += 1
-		inner, inner_ok := parse_expression(p)
-		p.depth -= 1
-		if !inner_ok do return
-		close := expect(p, .Paren_Close) or_return
-		return add_node(
-				p,
-				{tag = .Grouped, main_token = open, data = {token_and_node = {close, inner}}},
-			),
-			true
+		return parse_group_or_lambda(p)
 	}
 	add_error(p, {tag = .Expected_Expression})
 	return
+}
+
+// Group <- PAREN_OPEN Expr PAREN_CLOSE
+//
+// Lambda <- PAREN_OPEN Params PAREN_CLOSE EQ_GT (Block / Expr)
+//
+// Both start as an `ExprList`, which becomes the parameters when `=>` follows.
+parse_group_or_lambda :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	open := expect(p, .Paren_Open) or_return
+
+	scratch_top := len(p.scratch)
+	defer non_zero_resize(&p.scratch, scratch_top)
+
+	parse_expr_list(p, .Paren_Close) or_return
+	items := p.scratch[scratch_top:]
+	before_close := p.i - 1
+	for p.tokens[before_close].tag == .Newline do before_close -= 1
+	trailing_comma := p.tokens[before_close].tag == .Comma
+	close := expect(p, .Paren_Close) or_return
+
+	// like `else`, `=>` must be on the same line as the `)` before it
+	if peek_tag(p) == .Newline && p.tokens[p.i + 1].tag == .Eq_Gt {
+		add_error(p, {tag = .Arrow_On_New_Line, token = Token_Index(p.i + 1)})
+		advance(p)
+	}
+	if peek_tag(p) != .Eq_Gt {
+		is_spread := len(items) == 1 && p.nodes[items[0]].tag == .Spread
+		if len(items) == 1 && !is_spread && !trailing_comma {
+			return add_node(
+					p,
+					{
+						tag = .Grouped,
+						main_token = open,
+						data = {token_and_node = {close, items[0]}},
+					},
+				),
+				true
+		}
+		tag: Parse_Error_Tag = .List_Parens_Not_Lambda
+		if len(items) == 0 do tag = .Empty_Parens_Not_Lambda
+		if is_spread do tag = .Spread_Parens_Not_Lambda
+		add_error(p, {tag = tag})
+		return
+	}
+	advance(p)
+
+	if len(items) > common.MAX_PARAMETERS {
+		add_error(p, {tag = .Too_Many_Parameters, token = open})
+		return
+	}
+	for item, i in items {
+		#partial switch p.nodes[item].tag {
+		case .Identifier:
+		case .Spread:
+			operand := p.nodes[item].data.node
+			if p.nodes[operand].tag != .Identifier {
+				add_error(
+					p,
+					{
+						tag = .Invalid_Parameter,
+						token = p.nodes[operand].main_token,
+						node = operand,
+					},
+				)
+				return
+			}
+			if i != len(items) - 1 {
+				add_error(p, {tag = .Rest_Param_Not_Last, token = p.nodes[item].main_token})
+				return
+			}
+			p.nodes[item] = {
+				tag        = .Rest_Param,
+				main_token = p.nodes[operand].main_token,
+			}
+		case:
+			add_error(p, {tag = .Invalid_Parameter, token = p.nodes[item].main_token, node = item})
+			return
+		}
+	}
+	params := add_extra(p, make_range(p, items))
+
+	body: Node_Index
+	if peek_tag(p) == .Brace_Open {
+		body = parse_block(p) or_return
+	} else {
+		body = parse_expression(p) or_return
+	}
+	return add_node(
+			p,
+			{tag = .Lambda, main_token = open, data = {node_and_extra = {body, params}}},
+		),
+		true
 }
 
 peek_tag :: proc(p: ^Parser) -> Token_Tag {

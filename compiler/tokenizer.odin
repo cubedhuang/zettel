@@ -12,6 +12,7 @@ Token_Tag :: enum u8 {
 	// Symbols
 	Eq,
 	Eq_Eq,
+	Eq_Gt,
 	Bang,
 	Bang_Eq,
 	Lt,
@@ -81,6 +82,7 @@ token_lexemes := #partial [Token_Tag]string {
 	// Symbols
 	.Eq                  = "=",
 	.Eq_Eq               = "==",
+	.Eq_Gt               = "=>",
 	.Bang                = "!",
 	.Bang_Eq             = "!=",
 	.Lt                  = "<",
@@ -149,6 +151,7 @@ token_names := [Token_Tag]string {
 	// Symbols
 	.Eq                  = "'='",
 	.Eq_Eq               = "'=='",
+	.Eq_Gt               = "'=>'",
 	.Bang                = "'!'",
 	.Bang_Eq             = "'!='",
 	.Lt                  = "'<'",
@@ -266,7 +269,11 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 
 	switch c {
 	case '=':
-		token.tag = .Eq_Eq if match(t, '=') else .Eq
+		if match(t, '=') {
+			token.tag = .Eq_Eq
+		} else {
+			token.tag = .Eq_Gt if match(t, '>') else .Eq
+		}
 	case '!':
 		token.tag = .Bang_Eq if match(t, '=') else .Bang
 	case '<':

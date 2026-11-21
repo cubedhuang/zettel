@@ -634,8 +634,6 @@ compile_break :: proc(c: ^Compiler, index: Node_Index) {
 compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 	name := declared_name(c.ast, index)
 	name_span := token_span(c.ast, c.ast.nodes[index].main_token + 1)
-	params, body := fn_parts(c.ast, index)
-	variadic := fn_is_variadic(c.ast, params)
 	kind: common.Function_Kind =
 		.Constructor if c.ast.nodes[index].tag == .Constructor_Decl else .Function
 
@@ -645,6 +643,28 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 		if kind == .Constructor do fail(c, .Not_In_Class_Body, index)
 		declare_local(c, name, index)
 	}
+	// a local function's value lands in its slot
+	compile_function(c, index, kind, name)
+	if is_static {
+		emit_variable(
+			c,
+			.Set_Static,
+			{kind = .Static, slot = c.class.static_slots[name]},
+			name_span,
+		)
+	}
+}
+
+// Compiles a `Fn_Decl`, `Constructor_Decl`, or `Lambda`, and pushes its closure. `name` is empty
+// for a lambda.
+compile_function :: proc(
+	c: ^Compiler,
+	index: Node_Index,
+	kind: common.Function_Kind,
+	name: string,
+) {
+	params, body := fn_parts(c.ast, index)
+	variadic := fn_is_variadic(c.ast, params)
 
 	chunk := Chunk_Compiler {
 		enclosing = c.chunk,
@@ -655,19 +675,23 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 	for param in params {
 		declare_local(c, token_text(c.ast, c.ast.nodes[param].main_token), param)
 	}
-	for statement in block_statements(c.ast, body) {
-		compile_statement(c, statement)
+	if c.ast.nodes[body].tag == .Block {
+		for statement in block_statements(c.ast, body) {
+			compile_statement(c, statement)
+		}
+		end_span := token_span(c.ast, last_token(c.ast, body))
+		emit(c, .Nil, end_span)
+		emit(c, .Return, end_span)
+		emit_byte(c, 1, end_span)
+	} else {
+		// an expression body is returned, like `return body`
+		emit_return(c, {body}, node_span(c.ast, body))
 	}
-	end_span := token_span(c.ast, last_token(c.ast, body))
-	emit(c, .Nil, end_span)
-	emit(c, .Return, end_span)
-	emit_byte(c, 1, end_span)
 	c.chunk = chunk.enclosing
 
 	// Nested functions were added while compiling the body, so this one goes after them.
 	constant := common.Constant_Function{u32(len(c.functions))}
 	upvalue_count := len(chunk.upvalues)
-	// A local function's value lands in its slot.
 	if upvalue_count == 0 {
 		emit_constant(c, constant, index)
 	} else {
@@ -675,14 +699,6 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 		emit(c, .Closure, span)
 		emit_u16(c, add_constant(c, constant, index), span)
 		for capture in chunk.upvalues do emit_capture(c, capture, span)
-	}
-	if is_static {
-		emit_variable(
-			c,
-			.Set_Static,
-			{kind = .Static, slot = c.class.static_slots[name]},
-			name_span,
-		)
 	}
 
 	append(
@@ -764,7 +780,11 @@ compile_return :: proc(c: ^Compiler, index: Node_Index) {
 	values := return_values(c.ast, index)
 	// the VM returns the new instance instead of the value
 	if c.chunk.kind == .Constructor && len(values) > 0 do fail(c, .Return_In_Constructor, index)
-	span := node_span(c.ast, index)
+	emit_return(c, values, node_span(c.ast, index))
+}
+
+// Returns `values`, or nil when there are none.
+emit_return :: proc(c: ^Compiler, values: []Node_Index, span: common.Span) {
 	count := len(values)
 	switch {
 	case count == 0:
@@ -805,6 +825,8 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		emit_get(c, variable, span)
 	case .Grouped:
 		compile_expression(c, node.data.token_and_node.node)
+	case .Lambda:
+		compile_function(c, index, .Function, "")
 	case .Negate:
 		compile_expression(c, node.data.node)
 		emit(c, .Negate, span)

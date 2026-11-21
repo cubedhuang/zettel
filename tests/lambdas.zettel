@@ -1,0 +1,54 @@
+// an expression body is returned
+double := (x) => x * 2
+echo double(4) // expect: 8
+add := (a, b,) => a + b
+echo add(1, 2) // expect: 3
+echo (() => "no parameters")() // expect: "no parameters"
+
+// a block body works like a function's
+log := (..args) => {
+    print(..args)
+}
+log(1, "a") // expect: 1 a
+echo log(2) // expect: 2
+// expect: nil
+
+// an expression body that's a call returns all of its values, like `return f()`
+fn two() {
+    return 1, 2
+}
+forward := () => two()
+a, b := forward()
+echo a + b // expect: 3
+both := () => {
+    return "x", "y"
+}
+c, d := both()
+echo d // expect: "y"
+
+// lambdas capture variables like functions do
+fn adder(n) {
+    return (x) => x + n
+}
+echo adder(10)(5) // expect: 15
+curry := (a) => (b) => a - b
+echo curry(10)(3) // expect: 7
+count := 0
+bump := () => {
+    count += 1
+}
+bump()
+bump()
+echo count // expect: 2
+
+// lambdas are often arguments
+fn apply(f, value) {
+    return f(value)
+}
+echo apply((s) => s + "!", "hi") // expect: "hi!"
+
+// a lambda has no name
+echo double // expect: <fn>
+
+// a single expression in parentheses is still a group
+echo (1 + 2) * 3 // expect: 9

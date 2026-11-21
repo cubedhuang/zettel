@@ -31,6 +31,18 @@ echo empty_index[] // error: expected expression, got ']'
 // a property needs a name
 echo empty_index.0 // error: expected an identifier, got a number
 
+// a parenthesized list is only valid as a lambda's parameters
+pair := (1, 2)       // error: a list in parentheses can only be a lambda's parameters; expected '=>', got a newline
+nothing := ()        // error: empty parentheses can only be a lambda's parameters; expected '=>', got a newline
+trailing := (pair,)  // error: a list in parentheses can only be a lambda's parameters; expected '=>', got a newline
+spread := (..pair)   // error: '..' in parentheses can only make a lambda's rest parameter; expected '=>', got a newline
+bad_param := (1) => 2           // error: a parameter must be a name, got a number
+bad_expr := (a + 1) => 2        // error: a parameter must be a name, got an expression
+bad_rest := (..rest, last) => 1 // error: a rest parameter must be the last parameter
+// '=>' must be on the same line as the parameters, but the lambda is still parsed
+split := (x)
+    => x // error: '=>' must be on the same line as the lambda's parameters
+
 // a constructor needs a parameter for the new instance
 constructor no_self() {}     // error: a constructor needs a first parameter for the new instance, like 'self'
 constructor rest_self(..r) {} // error: a constructor needs a first parameter for the new instance, like 'self'

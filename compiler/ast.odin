@@ -164,6 +164,13 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `(`.
 	Grouped,
+	// `(params) => body`, where the body is a `Block` or an expression that's returned.
+	//
+	// The `data` field is `node_and_extra`, like `Fn_Decl`. The node is the body and the extra
+	// points at a `Node_Range` of parameters.
+	//
+	// The `main_token` field is the `(`.
+	Lambda,
 	// `-node`.
 	//
 	// The `data` field is the operand.
@@ -297,6 +304,9 @@ Parse_Error :: struct {
 	expected:       Token_Tag,
 	// Only `Mixed_Operators` uses this. It's the operator that `token` can't be mixed with.
 	other:          Token_Tag,
+	// Only `Invalid_Parameter` uses this. It's the expression that can't be a parameter, and the
+	// error covers all of it.
+	node:           Node_Index,
 	// Set when `token` is on a later line than the unfinished code before it.
 	// The error is then reported at the end of `previous`.
 	after_previous: bool,
@@ -316,6 +326,12 @@ Parse_Error_Tag :: enum u8 {
 	Too_Many_Arguments,
 	Too_Many_Elements,
 	Rest_Param_Not_Last,
+	Invalid_Parameter,
+	// `()`, `(a, b)`, `(a,)`, or `(..a)` without `=>` after it.
+	Empty_Parens_Not_Lambda,
+	List_Parens_Not_Lambda,
+	Spread_Parens_Not_Lambda,
+	Arrow_On_New_Line,
 	Constructor_Without_Self,
 	Too_Many_Return_Values,
 	Compound_Assign_Multi,
@@ -370,12 +386,13 @@ assign_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
 	panic("tag of assign_values node must be assign or decl")
 }
 
-// For `Fn_Decl` and `Constructor_Decl`. The name is the token after `main_token`.
+// For `Fn_Decl`, `Constructor_Decl`, and `Lambda`. A declaration's name is the token after
+// `main_token`.
 fn_parts :: proc(ast: Ast, index: Node_Index) -> (params: []Node_Index, body: Node_Index) {
 	node := ast.nodes[index]
 	assert(
-		node.tag == .Fn_Decl || node.tag == .Constructor_Decl,
-		"tag of fn_parts node must be Fn_Decl or Constructor_Decl",
+		node.tag == .Fn_Decl || node.tag == .Constructor_Decl || node.tag == .Lambda,
+		"tag of fn_parts node must be Fn_Decl, Constructor_Decl, or Lambda",
 	)
 	range := extra_data(ast, node.data.node_and_extra.extra, Node_Range)
 	return extra_data_slice(ast, range, Node_Index), node.data.node_and_extra.node
@@ -394,7 +411,7 @@ return_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
 	panic("tag of return_values node must be a return")
 }
 
-// Whether a `Fn_Decl` or `Constructor_Decl` ends with a `Rest_Param`.
+// Whether a function's parameters end with a `Rest_Param`.
 fn_is_variadic :: proc(ast: Ast, params: []Node_Index) -> bool {
 	return len(params) > 0 && ast.nodes[params[len(params) - 1]].tag == .Rest_Param
 }
@@ -544,6 +561,7 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .False_Literal,
 		     .Identifier,
 		     .Grouped,
+		     .Lambda,
 		     .Negate,
 		     .Not,
 		     .Bit_Not,
@@ -614,7 +632,7 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			index = node.data.node
 		case .Break, .Continue:
 			return node.data.token if node.data.token != 0 else node.main_token
-		case .Fn_Decl, .Constructor_Decl:
+		case .Fn_Decl, .Constructor_Decl, .Lambda:
 			index = node.data.node_and_extra.node
 		case .Class_Decl:
 			index = node.data.node
@@ -723,6 +741,28 @@ parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 		return fmt.tprintf("more than %v elements", common.MAX_ELEMENTS)
 	case .Rest_Param_Not_Last:
 		return "a rest parameter must be the last parameter"
+	case .Invalid_Parameter:
+		// a single token is a literal, and anything longer is a bigger expression
+		got := found
+		if first_token(ast, error.node) != last_token(ast, error.node) do got = "an expression"
+		return fmt.tprintf("a parameter must be a name, got %v", got)
+	case .Empty_Parens_Not_Lambda:
+		return fmt.tprintf(
+			"empty parentheses can only be a lambda's parameters; expected '=>', got %v",
+			found,
+		)
+	case .List_Parens_Not_Lambda:
+		return fmt.tprintf(
+			"a list in parentheses can only be a lambda's parameters; expected '=>', got %v",
+			found,
+		)
+	case .Spread_Parens_Not_Lambda:
+		return fmt.tprintf(
+			"'..' in parentheses can only make a lambda's rest parameter; expected '=>', got %v",
+			found,
+		)
+	case .Arrow_On_New_Line:
+		return "'=>' must be on the same line as the lambda's parameters"
 	case .Constructor_Without_Self:
 		return "a constructor needs a first parameter for the new instance, like 'self'"
 	case .Too_Many_Return_Values:
@@ -755,5 +795,6 @@ parse_error_span :: proc(ast: Ast, error: Parse_Error) -> common.Span {
 		end := token_end(ast, error.previous)
 		return {start = end, end = end, main = end}
 	}
+	if error.tag == .Invalid_Parameter do return node_span(ast, error.node)
 	return token_span(ast, error.token)
 }

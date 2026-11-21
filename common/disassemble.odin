@@ -8,11 +8,13 @@ disassemble :: proc(w: io.Writer, module: Module) {
 	for function in module.functions {
 		switch function.kind {
 		case .Function, .Constructor:
+			name := function_name(module, function)
 			fmt.wprintf(
 				w,
-				"\n%v %s/%v%v:\n",
+				"\n%v%v%s/%v%v:\n",
 				"fn" if function.kind == .Function else "constructor",
-				function_name(module, function),
+				" " if name != "" else "",
+				name,
 				function.arity,
 				"+" if function.variadic else "",
 				flush = false,
@@ -138,8 +140,11 @@ disassemble_constant :: proc(w: io.Writer, module: Module, constant: Constant) {
 		fmt.wprintf(w, "\"%s\"", constant_string(module, c), flush = false)
 	case Constant_Function:
 		function := module.functions[c.index]
-		kind := "class body" if function.kind == .Class_Body else "fn"
-		fmt.wprintf(w, "<%v %s>", kind, function_name(module, function), flush = false)
+		kind := "class body " if function.kind == .Class_Body else "fn "
+		name := function_name(module, function)
+		// a lambda has no name
+		if name == "" do kind = "fn"
+		fmt.wprintf(w, "<%v%s>", kind, name, flush = false)
 	case Constant_Class:
 		fmt.wprintf(w, "<class %s>", class_name(module, module.classes[c.index]), flush = false)
 	}

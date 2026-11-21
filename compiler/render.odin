@@ -127,6 +127,13 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_string(w, "(.. ")
 		render_node(w, ast, node.data.node, indent)
 		io.write_byte(w, ')')
+	case .Lambda:
+		params, body := fn_parts(ast, index)
+		io.write_string(w, "(=> ")
+		render_node_list(w, ast, params, true, indent)
+		io.write_byte(w, ' ')
+		render_node(w, ast, body, indent + 1)
+		io.write_byte(w, ')')
 	case .Grouped:
 		io.write_string(w, "(group ")
 		render_node(w, ast, node.data.token_and_node.node, indent)

@@ -61,7 +61,11 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Clo
 	functions := make([]^Obj_Function, len(module.functions))
 	defer delete(functions)
 	for function, index in module.functions {
-		name := intern_clone(vm, common.function_name(module, function))
+		// a lambda has no name
+		name: ^Obj_String
+		if text := common.function_name(module, function); text != "" {
+			name = intern_clone(vm, text)
+		}
 		functions[index] = new_function(vm, classes[function.class], name, function.arity)
 		functions[index].kind = function.kind
 		functions[index].variadic = function.variadic

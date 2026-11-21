@@ -70,11 +70,11 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		render_indent(w, indent)
 		render_node(w, ast, body, indent + 1)
 		io.write_byte(w, ')')
-	case .Return:
+	case .Return, .Return_Multi:
 		io.write_string(w, "(return")
-		if node.data.node != 0 {
+		for value in return_values(ast, index) {
 			io.write_byte(w, ' ')
-			render_node(w, ast, node.data.node, indent)
+			render_node(w, ast, value, indent)
 		}
 		io.write_byte(w, ')')
 	case .Call_One, .Call:

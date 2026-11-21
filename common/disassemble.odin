@@ -65,10 +65,23 @@ disassemble_chunk :: proc(w: io.Writer, module: Module, chunk: Chunk) {
 			fmt.wprintf(w, " %v", builtin_names[Builtin(chunk.code[offset + 1])], flush = false)
 		case .Call:
 			fmt.wprintf(w, " (%v)", chunk.code[offset + 1], flush = false)
+			disassemble_results(w, chunk.code[offset + 2], " -> ")
+		case .Call_Spread:
+			disassemble_results(w, chunk.code[offset + 1], " -> ")
+		case .Return:
+			disassemble_results(w, chunk.code[offset + 1], " ")
 		}
 
 		io.write_byte(w, '\n')
 		offset += size
+	}
+}
+
+disassemble_results :: proc(w: io.Writer, count: u8, prefix: string) {
+	if count == ALL_RESULTS {
+		fmt.wprintf(w, "%vall", prefix, flush = false)
+	} else {
+		fmt.wprintf(w, "%v%v", prefix, count, flush = false)
 	}
 }
 

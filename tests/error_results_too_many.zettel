@@ -1,0 +1,2 @@
+fn pair() { return 1, 2 }
+x := pair() // error: expected 1 return value, got 2

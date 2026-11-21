@@ -68,15 +68,23 @@ Op :: enum u8 {
 	Closure,
 	// Moves the local on top of the stack into the upvalues that captured it, then pops it.
 	Close_Upvalue,
-	// Calls the value below its arguments, which are on top of the stack. The operand is the
-	// argument count.
+	// Calls the value below its arguments, which are on top of the stack. The operands are the
+	// argument count and the number of return values the caller expects, or `ALL_RESULTS`.
+	// Afterwards, the return values replace the callee and arguments.
 	Call,
-	// Like `Call`, but the arguments are an array on top of the stack, from spreading.
+	// Like `Call`, but the arguments are an array on top of the stack, from spreading. The
+	// operand is the expected number of return values.
 	Call_Spread,
-	// Pops the return value and the frame, including the callee, then pushes the return value.
+	// Pops the frame, including the callee, and pushes the return values in its place. The
+	// operand is how many values are on top of the stack, or `ALL_RESULTS` to forward the values
+	// of the call right before it.
 	Return,
 	//
 	Pop,
+	// Pops every value of the call right before it, which expected `ALL_RESULTS`.
+	Pop_Results,
+	// Writes the values of the call right before it, like `Echo_Result`, without popping them.
+	Echo_Results,
 	// Writes the top value to the output without popping it.
 	Echo,
 	// Like `Echo`, but writes nothing for `nil`; used in the REPL.
@@ -99,8 +107,14 @@ op_operand_size := #partial [Op]int {
 	.Set_Upvalue   = 1,
 	// Not including the captures.
 	.Closure       = 2,
-	.Call          = 1,
+	.Call          = 2,
+	.Call_Spread   = 1,
+	.Return        = 1,
 }
+
+// For the expected result count of `Call` and `Call_Spread` and the count of `Return`: any number
+// of values, which the VM remembers until the next call returns.
+ALL_RESULTS :: 255
 
 Capture :: struct {
 	// Whether `index` is a local of the enclosing function, rather than one of its upvalues.
@@ -130,6 +144,7 @@ MAX_LOCALS :: 1 << 16
 MAX_PARAMETERS :: 255
 MAX_UPVALUES :: 256
 MAX_ELEMENTS :: int(max(u16))
+MAX_RESULTS :: ALL_RESULTS - 1
 
 read_u16 :: proc(code: []u8, offset: int) -> u16 {
 	return u16(code[offset]) | u16(code[offset + 1]) << 8

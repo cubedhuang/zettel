@@ -19,6 +19,8 @@ Vm :: struct {
 	modules:       map[string]^Obj_Class,
 	builtins:      [common.Builtin]Value,
 	open_upvalues: ^Obj_Upvalue,
+	// How many values the last call that expected `common.ALL_RESULTS` returned.
+	result_count:  int,
 }
 
 Frame :: struct {
@@ -27,6 +29,8 @@ Frame :: struct {
 	ip:      int,
 	// Stack index of the frame's first local. The callee is right below it.
 	base:    int,
+	// How many values the caller expects, or `common.ALL_RESULTS`.
+	results: int,
 }
 
 Runtime_Error :: struct {
@@ -64,7 +68,7 @@ vm_destroy :: proc(vm: ^Vm) {
 
 // Runs a class body from `load`.
 run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
-	append(&vm.frames, Frame{closure = main, base = len(vm.stack)})
+	append(&vm.frames, Frame{closure = main, base = len(vm.stack), results = common.ALL_RESULTS})
 	chunk := main.function.chunk
 	statics := main.function.class.statics[:]
 	upvalues := main.upvalues
@@ -237,9 +241,11 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 				append(&vm.stack, ..args.items[:])
 				arg_count = len(args.items)
 			}
+			results := int(chunk.code[ip])
+			ip += 1
 
 			vm.frames[len(vm.frames) - 1].ip = ip
-			if message := call_value(vm, arg_count); message != "" {
+			if message := call_value(vm, arg_count, results); message != "" {
 				return runtime_error(vm, chunk, start, message)
 			}
 			// a function call pushed a frame, and a native call left the same one
@@ -267,17 +273,25 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			close_upvalues(vm, len(vm.stack) - 1)
 			vm_pop(vm)
 		case .Return:
-			result := vm_pop(vm)
+			count := int(chunk.code[ip])
+			if count == common.ALL_RESULTS do count = vm.result_count
 			finished := pop(&vm.frames)
 			close_upvalues(vm, finished.base)
 			if len(vm.frames) == 0 {
 				resize(&vm.stack, finished.base)
 				return {}, true
 			}
-			resize(&vm.stack, finished.base - 1)
-			vm_push(vm, result)
 
 			frame := vm.frames[len(vm.frames) - 1]
+			if message := check_results(vm, finished.results, count); message != "" {
+				// the call instruction's last byte is right before the caller's ip
+				return runtime_error(vm, frame.closure.function.chunk, frame.ip - 1, message)
+			}
+			// move the values down over the callee
+			callee_slot := finished.base - 1
+			copy(vm.stack[callee_slot:], vm.stack[len(vm.stack) - count:])
+			resize(&vm.stack, callee_slot + count)
+
 			chunk = frame.closure.function.chunk
 			statics = frame.closure.function.class.statics[:]
 			upvalues = frame.closure.upvalues
@@ -285,6 +299,16 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			ip = frame.ip
 		case .Pop:
 			vm_pop(vm)
+		case .Pop_Results:
+			resize(&vm.stack, len(vm.stack) - vm.result_count)
+		case .Echo_Results:
+			values := vm.stack[len(vm.stack) - vm.result_count:]
+			if len(values) == 1 && values[0] == NIL do break
+			for value, i in values {
+				if i > 0 do io.write_string(vm.out, ", ")
+				write_value(vm.out, value)
+			}
+			io.write_byte(vm.out, '\n')
 		case .Echo:
 			write_value(vm.out, vm_peek(vm))
 			io.write_byte(vm.out, '\n')
@@ -305,9 +329,10 @@ runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runti
 	return {message = message, span = chunk.spans[ip], source = chunk.source}, false
 }
 
-// Calls the value below the top `arg_count` values. For a function, this pushes its frame.
+// Calls the value below the top `arg_count` values, which must return `results` values (or
+// `common.ALL_RESULTS`). For a function, this pushes its frame.
 // An error message may use `context.temp_allocator`.
-call_value :: proc(vm: ^Vm, arg_count: int) -> (error: string) {
+call_value :: proc(vm: ^Vm, arg_count: int, results: int) -> (error: string) {
 	callee_slot := len(vm.stack) - arg_count - 1
 	callee, is_obj := as_obj(vm.stack[callee_slot])
 	if !is_obj do return "can only call functions"
@@ -320,6 +345,7 @@ call_value :: proc(vm: ^Vm, arg_count: int) -> (error: string) {
 		}
 		result, native_error := native.procedure(vm, vm.stack[callee_slot + 1:])
 		if native_error != "" do return native_error
+		if message := check_results(vm, results, 1); message != "" do return message
 		resize(&vm.stack, callee_slot)
 		vm_push(vm, result)
 		return ""
@@ -333,10 +359,26 @@ call_value :: proc(vm: ^Vm, arg_count: int) -> (error: string) {
 		if function.variadic {
 			vm_push(vm, to_value(pop_array(vm, arg_count - function.arity)))
 		}
-		append(&vm.frames, Frame{closure = closure, base = callee_slot + 1})
+		append(&vm.frames, Frame{closure = closure, base = callee_slot + 1, results = results})
 		return ""
 	}
 	return "can only call functions"
+}
+
+// Checks a call's return value count against what the caller expects, and remembers it when the
+// caller takes any number.
+check_results :: proc(vm: ^Vm, expected, count: int) -> (error: string) {
+	if expected == common.ALL_RESULTS {
+		vm.result_count = count
+		return ""
+	}
+	if count == expected do return ""
+	return fmt.tprintf(
+		"expected %v return value%v, got %v",
+		expected,
+		"" if expected == 1 else "s",
+		count,
+	)
 }
 
 arity_matches :: proc(arity: int, variadic: bool, arg_count: int) -> bool {

@@ -113,6 +113,12 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `return`.
 	Return,
+	// `return a, b, ...`.
+	//
+	// The `data` field is `extra_range` of values.
+	//
+	// The `main_token` field is the `return`.
+	Return_Multi,
 
 	// ---------- Expressions ----------
 
@@ -270,6 +276,7 @@ Parse_Error_Tag :: enum u8 {
 	Too_Many_Arguments,
 	Too_Many_Elements,
 	Rest_Param_Not_Last,
+	Too_Many_Return_Values,
 	Else_On_New_Line,
 }
 
@@ -324,6 +331,19 @@ fn_parts :: proc(ast: Ast, index: Node_Index) -> (params: []Node_Index, body: No
 	assert(node.tag == .Fn_Decl, "tag of fn_parts node must be Fn_Decl")
 	range := extra_data(ast, node.data.node_and_extra.extra, Node_Range)
 	return extra_data_slice(ast, range, Node_Index), node.data.node_and_extra.node
+}
+
+// For `Return` and `Return_Multi`. Empty for a bare `return`.
+return_values :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
+	node := ast.nodes[index]
+	#partial switch node.tag {
+	case .Return:
+		if node.data.node == 0 do return nil
+		return slice.from_ptr(&ast.nodes[index].data.node, 1)
+	case .Return_Multi:
+		return extra_data_slice(ast, node.data.extra_range, Node_Index)
+	}
+	panic("tag of return_values node must be a return")
 }
 
 // Whether a `Fn_Decl` ends with a `Rest_Param`.
@@ -447,6 +467,7 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Continue,
 		     .Fn_Decl,
 		     .Return,
+		     .Return_Multi,
 		     .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -517,6 +538,9 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		case .Return:
 			if node.data.node == 0 do return node.main_token
 			index = node.data.node
+		case .Return_Multi:
+			values := return_values(ast, index)
+			index = values[len(values) - 1]
 		case .Call_One, .Call:
 			token := node.main_token
 			if _, args := call_parts(ast, index); len(args) > 0 {
@@ -601,6 +625,8 @@ parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 		return fmt.tprintf("more than %v elements", common.MAX_ELEMENTS)
 	case .Rest_Param_Not_Last:
 		return "a rest parameter must be the last parameter"
+	case .Too_Many_Return_Values:
+		return fmt.tprintf("more than %v return values", common.MAX_RESULTS)
 	case .Else_On_New_Line:
 		return "'else' must be on the same line as the '}' before it"
 	}

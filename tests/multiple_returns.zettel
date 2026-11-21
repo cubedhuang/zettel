@@ -1,0 +1,62 @@
+// a function can return several values
+fn divmod(a, b) {
+    q := 0
+    while (q + 1) * b <= a { q = q + 1 }
+    return q, a - q * b
+}
+q, r := divmod(7, 2)
+echo q // expect: 3
+echo r // expect: 1
+
+// they can be assigned to any targets
+xs := [0, 0]
+{
+    local := 0
+    local, xs[1] = divmod(9, 4)
+    echo local // expect: 2
+}
+echo xs // expect: [0, 1]
+q, r = divmod(10, 3)
+echo [q, r] // expect: [3, 1]
+
+// values are evaluated before any assignment
+fn swap(a, b) { return b, a }
+a, b := 1, 2
+a, b = swap(a, b)
+echo [a, b] // expect: [2, 1]
+
+// returning a call forwards all of its values
+fn forward(x, y) { return divmod(x, y) }
+fn forward_again(x, y) { return forward(x, y) }
+q, r = forward_again(17, 5)
+echo [q, r] // expect: [3, 2]
+fn three() { return 1, 2, 3 }
+fn forward_three() { return three() }
+x, y, z := forward_three()
+echo [x, y, z] // expect: [1, 2, 3]
+
+// a call statement discards every value
+divmod(1, 1)
+forward_three()
+
+// closures and variadic functions can return several values
+fn split(first, ..rest) { return first, rest }
+head, tail := split(1, 2, 3)
+echo head // expect: 1
+echo tail // expect: [2, 3]
+fn counter() {
+    n := 0
+    fn next() {
+        n = n + 1
+        return n, n * 10
+    }
+    return next
+}
+next := counter()
+next()
+n, tens := next()
+echo [n, tens] // expect: [2, 20]
+
+// single values and bare returns are unchanged
+fn nothing() { return }
+echo nothing() // expect: nil

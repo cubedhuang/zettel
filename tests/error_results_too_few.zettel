@@ -1,0 +1,2 @@
+fn single() { return 1 }
+a, b := single() // error: expected 2 return values, got 1

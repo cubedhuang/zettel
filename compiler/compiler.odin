@@ -115,6 +115,8 @@ Compile_Error_Tag :: enum u8 {
 	Invalid_Assignment_Target,
 	// `node` is the assignment or declaration.
 	Too_Few_Values,
+	// `node` is the assignment or declaration.
+	Too_Many_Results,
 	// `node` is the `break` or `continue`.
 	Outside_Loop,
 	// `node` is the `break` or `continue`.
@@ -252,6 +254,7 @@ compile_root :: proc(c: ^Compiler) {
 	span := token_span(c.ast, Token_Index(len(c.ast.tokens) - 1))
 	emit(c, .Nil, span)
 	emit(c, .Return, span)
+	emit_byte(c, 1, span)
 }
 
 compile_statement :: proc(c: ^Compiler, index: Node_Index) {
@@ -277,8 +280,14 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		compile_break(c, index)
 	case .Fn_Decl:
 		compile_fn_decl(c, index)
-	case .Return:
+	case .Return, .Return_Multi:
 		compile_return(c, index)
+	case .Call_One, .Call:
+		// a call statement discards however many values it returns
+		compile_call(c, index, common.ALL_RESULTS)
+		span := node_span(c.ast, index)
+		if c.echo_statements && in_static_scope(c) do emit(c, .Echo_Results, span)
+		emit(c, .Pop_Results, span)
 	case:
 		compile_expression(c, index)
 		span := node_span(c.ast, index)
@@ -354,11 +363,22 @@ compile_decl :: proc(c: ^Compiler, index: Node_Index) {
 }
 
 // Pushes the values of an assignment or declaration in order.
+//
+// A call that's the only value of several targets gives a value for each of them.
 compile_values :: proc(c: ^Compiler, index: Node_Index) {
 	values := assign_values(c.ast, index)
-	// TODO: allow fewer values once there are multiple returns
-	if len(values) < len(assign_targets(c.ast, index)) do fail(c, .Too_Few_Values, index)
+	target_count := len(assign_targets(c.ast, index))
+	if len(values) == 1 && target_count > 1 && is_call(c.ast, values[0]) {
+		if target_count > common.MAX_RESULTS do fail(c, .Too_Many_Results, index)
+		compile_call(c, values[0], target_count)
+		return
+	}
+	if len(values) < target_count do fail(c, .Too_Few_Values, index)
 	for value in values do compile_expression(c, value)
+}
+
+is_call :: proc(ast: Ast, index: Node_Index) -> bool {
+	return ast.nodes[index].tag == .Call_One || ast.nodes[index].tag == .Call
 }
 
 compile_if :: proc(c: ^Compiler, index: Node_Index) {
@@ -501,6 +521,7 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 	end_span := token_span(c.ast, last_token(c.ast, body))
 	emit(c, .Nil, end_span)
 	emit(c, .Return, end_span)
+	emit_byte(c, 1, end_span)
 	c.chunk = chunk.enclosing
 
 	// Nested functions were added while compiling the body, so this one goes after them.
@@ -533,14 +554,22 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 
 compile_return :: proc(c: ^Compiler, index: Node_Index) {
 	if in_class_body(c) do fail(c, .Return_Outside_Function, index)
-	value := c.ast.nodes[index].data.node
+	values := return_values(c.ast, index)
 	span := node_span(c.ast, index)
-	if value != 0 {
-		compile_expression(c, value)
-	} else {
+	count := len(values)
+	switch {
+	case count == 0:
 		emit(c, .Nil, span)
+		count = 1
+	case count == 1 && is_call(c.ast, values[0]):
+		// `return f()` forwards all of the call's values
+		compile_call(c, values[0], common.ALL_RESULTS)
+		count = common.ALL_RESULTS
+	case:
+		for value in values do compile_expression(c, value)
 	}
 	emit(c, .Return, span)
+	emit_byte(c, u8(count), span)
 }
 
 compile_expression :: proc(c: ^Compiler, index: Node_Index) {
@@ -597,14 +626,7 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		compile_expression(c, node.data.node_and_node.rhs)
 		emit(c, .Get_Index, span)
 	case .Call_One, .Call:
-		callee, args := call_parts(c.ast, index)
-		compile_expression(c, callee)
-		if compile_list(c, args, span) {
-			emit(c, .Call_Spread, span)
-		} else {
-			emit(c, .Call, span)
-			emit_byte(c, u8(len(args)), span)
-		}
+		compile_call(c, index, 1)
 	case .And, .Or:
 		compile_expression(c, node.data.node_and_node.lhs)
 		jump := emit_jump(c, .Jump_If_False if node.tag == .And else .Jump_If_True, span)
@@ -618,6 +640,20 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case:
 		unreachable()
 	}
+}
+
+// `results` is how many values the call must return, or `common.ALL_RESULTS`.
+compile_call :: proc(c: ^Compiler, index: Node_Index, results: int) {
+	span := node_span(c.ast, index)
+	callee, args := call_parts(c.ast, index)
+	compile_expression(c, callee)
+	if compile_list(c, args, span) {
+		emit(c, .Call_Spread, span)
+	} else {
+		emit(c, .Call, span)
+		emit_byte(c, u8(len(args)), span)
+	}
+	emit_byte(c, u8(results), span)
 }
 
 // Pushes the arguments or elements in `items`. If any is a `Spread`, they're collected into one
@@ -953,6 +989,8 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 		return "can only assign to variables and elements"
 	case .Too_Few_Values:
 		return "fewer values than targets"
+	case .Too_Many_Results:
+		return fmt.tprintf("more than %v targets for a call's values", common.MAX_RESULTS)
 	case .Outside_Loop:
 		return fmt.tprintf(
 			"'%v' outside of a loop",

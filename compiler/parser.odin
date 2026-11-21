@@ -93,7 +93,7 @@ parse_stmts :: proc(p: ^Parser, end: Token_Tag) -> Node_Range {
 //       / KEYWORD_BREAK IDENTIFIER? SEMI
 //       / KEYWORD_CONTINUE IDENTIFIER? SEMI
 //       / FnDecl
-//       / KEYWORD_RETURN Expr? SEMI
+//       / KEYWORD_RETURN Exprs? SEMI
 //       / SimpleStmt SEMI
 //
 // Block <- BRACE_OPEN Stmt* BRACE_CLOSE
@@ -116,13 +116,25 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		return parse_fn_decl(p)
 	case .Keyword_Return:
 		keyword := advance(p)
-		value: Node_Index
+		values: Exprs = Node_Index(0)
 		#partial switch peek_tag(p) {
 		case .Semi, .Newline, .Brace_Close, .EOF:
 		case:
-			value = parse_expression(p) or_return
+			values = parse_exprs(p) or_return
 		}
-		node = add_node(p, {tag = .Return, main_token = keyword, data = {node = value}})
+		switch v in values {
+		case Node_Index:
+			node = add_node(p, {tag = .Return, main_token = keyword, data = {node = v}})
+		case Node_Range:
+			if exprs_len(v) > common.MAX_RESULTS {
+				add_error(p, {tag = .Too_Many_Return_Values, token = keyword})
+				return
+			}
+			node = add_node(
+				p,
+				{tag = .Return_Multi, main_token = keyword, data = {extra_range = v}},
+			)
+		}
 		expect_stmt_end(p) or_return
 		return node, true
 	case .Identifier:

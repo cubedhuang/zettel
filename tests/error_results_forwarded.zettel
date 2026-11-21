@@ -1,0 +1,4 @@
+fn pair() { return 1, 2 }
+fn forward() { return pair() }
+// the error is at the call that expected one value
+echo forward() // error: expected 1 return value, got 2

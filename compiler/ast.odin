@@ -62,6 +62,10 @@ Node_Tag :: enum u8 {
 	Decl,
 	// `a, b := ...`. Same layout as `Assign_Multi`.
 	Decl_Multi,
+	// `lhs += rhs`, or another operator followed by `=`. Same layout as `Assign`.
+	//
+	// The `main_token` field is the operator, such as `+=`.
+	Compound_Assign,
 	// `if lhs rhs`.
 	//
 	// The `data` field is `node_and_node`. `lhs` is the condition and `rhs` is the `Block`.
@@ -158,6 +162,8 @@ Node_Tag :: enum u8 {
 	Negate,
 	// `!node`. Same layout as `Negate`.
 	Not,
+	// `~node`, bitwise not. Same layout as `Negate`.
+	Bit_Not,
 	// `echo node`. Same layout as `Negate`.
 	Echo,
 	// `lhs()` or `lhs(rhs)`.
@@ -197,6 +203,20 @@ Node_Tag :: enum u8 {
 	Mul,
 	// `lhs / rhs`
 	Div,
+	// `lhs % rhs`
+	Mod,
+	// `lhs ^ rhs`
+	Pow,
+	// `lhs & rhs`
+	Bit_And,
+	// `lhs | rhs`
+	Bit_Or,
+	// `lhs ~ rhs`
+	Bit_Xor,
+	// `lhs << rhs`
+	Shift_Left,
+	// `lhs >> rhs`
+	Shift_Right,
 	// `lhs == rhs`
 	Equal,
 	// `lhs != rhs`
@@ -257,6 +277,8 @@ Parse_Error :: struct {
 	token:          Token_Index,
 	// Only `Expected_Token` uses this.
 	expected:       Token_Tag,
+	// Only `Mixed_Operators` uses this. It's the operator that `token` can't be mixed with.
+	other:          Token_Tag,
 	// Set when `token` is on a later line than the unfinished code before it.
 	// The error is then reported at the end of `previous`.
 	after_previous: bool,
@@ -277,6 +299,10 @@ Parse_Error_Tag :: enum u8 {
 	Too_Many_Elements,
 	Rest_Param_Not_Last,
 	Too_Many_Return_Values,
+	Compound_Assign_Multi,
+	Chained_Comparison,
+	Mixed_Operators,
+	Unary_Before_Power,
 	Else_On_New_Line,
 }
 
@@ -480,6 +506,7 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Grouped,
 		     .Negate,
 		     .Not,
+		     .Bit_Not,
 		     .Echo,
 		     .Array_Literal,
 		     .Spread:
@@ -488,10 +515,18 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			return node.main_token - 1
 		case .Assign,
 		     .Decl,
+		     .Compound_Assign,
 		     .Add,
 		     .Sub,
 		     .Mul,
 		     .Div,
+		     .Mod,
+		     .Pow,
+		     .Bit_And,
+		     .Bit_Or,
+		     .Bit_Xor,
+		     .Shift_Left,
+		     .Shift_Right,
 		     .Equal,
 		     .Not_Equal,
 		     .Less,
@@ -567,16 +602,24 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			return node.main_token
 		case .Grouped:
 			return node.data.token_and_node.token
-		case .Negate, .Not, .Echo, .Spread:
+		case .Negate, .Not, .Bit_Not, .Echo, .Spread:
 			index = node.data.node
 		case .Rest_Param:
 			return node.main_token
 		case .Assign,
 		     .Decl,
+		     .Compound_Assign,
 		     .Add,
 		     .Sub,
 		     .Mul,
 		     .Div,
+		     .Mod,
+		     .Pow,
+		     .Bit_And,
+		     .Bit_Or,
+		     .Bit_Xor,
+		     .Shift_Left,
+		     .Shift_Right,
 		     .Equal,
 		     .Not_Equal,
 		     .Less,
@@ -603,6 +646,11 @@ skip_to_close :: proc(ast: Ast, token: Token_Index) -> Token_Index {
 // Uses `context.temp_allocator`.
 parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 	found := token_names[ast.tokens[error.token].tag]
+	// the only invalid token that starts with a quote is a string missing its closing quote
+	if ast.tokens[error.token].tag == .Invalid &&
+	   ast.source[ast.tokens[error.token].start] == '"' {
+		found = "an unterminated string"
+	}
 	switch error.tag {
 	case .Expected_Expression:
 		return fmt.tprintf("expected expression, got %v", found)
@@ -630,6 +678,18 @@ parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 		return "a rest parameter must be the last parameter"
 	case .Too_Many_Return_Values:
 		return fmt.tprintf("more than %v return values", common.MAX_RESULTS)
+	case .Compound_Assign_Multi:
+		return fmt.tprintf("%v takes one target and one value", found)
+	case .Chained_Comparison:
+		return "comparisons can't be chained; use 'and' or parentheses"
+	case .Mixed_Operators:
+		return fmt.tprintf(
+			"%v and %v need parentheses to show which applies first",
+			found,
+			token_names[error.other],
+		)
+	case .Unary_Before_Power:
+		return fmt.tprintf("%v and '^' need parentheses to show which applies first", found)
 	case .Else_On_New_Line:
 		return "'else' must be on the same line as the '}' before it"
 	}

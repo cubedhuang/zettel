@@ -22,6 +22,24 @@ Token_Tag :: enum u8 {
 	Minus,
 	Star,
 	Slash,
+	Percent,
+	Caret,
+	Amp,
+	Pipe,
+	Tilde,
+	Lt_Lt,
+	Gt_Gt,
+	Plus_Eq,
+	Minus_Eq,
+	Star_Eq,
+	Slash_Eq,
+	Percent_Eq,
+	Caret_Eq,
+	Amp_Eq,
+	Pipe_Eq,
+	Tilde_Eq,
+	Lt_Lt_Eq,
+	Gt_Gt_Eq,
 	Semi,
 	Newline,
 	Colon,
@@ -70,6 +88,24 @@ token_lexemes := #partial [Token_Tag]string {
 	.Minus               = "-",
 	.Star                = "*",
 	.Slash               = "/",
+	.Percent             = "%",
+	.Caret               = "^",
+	.Amp                 = "&",
+	.Pipe                = "|",
+	.Tilde               = "~",
+	.Lt_Lt               = "<<",
+	.Gt_Gt               = ">>",
+	.Plus_Eq             = "+=",
+	.Minus_Eq            = "-=",
+	.Star_Eq             = "*=",
+	.Slash_Eq            = "/=",
+	.Percent_Eq          = "%=",
+	.Caret_Eq            = "^=",
+	.Amp_Eq              = "&=",
+	.Pipe_Eq             = "|=",
+	.Tilde_Eq            = "~=",
+	.Lt_Lt_Eq            = "<<=",
+	.Gt_Gt_Eq            = ">>=",
 	.Semi                = ";",
 	.Newline             = "\n",
 	.Colon               = ":",
@@ -117,6 +153,24 @@ token_names := [Token_Tag]string {
 	.Minus               = "'-'",
 	.Star                = "'*'",
 	.Slash               = "'/'",
+	.Percent             = "'%'",
+	.Caret               = "'^'",
+	.Amp                 = "'&'",
+	.Pipe                = "'|'",
+	.Tilde               = "'~'",
+	.Lt_Lt               = "'<<'",
+	.Gt_Gt               = "'>>'",
+	.Plus_Eq             = "'+='",
+	.Minus_Eq            = "'-='",
+	.Star_Eq             = "'*='",
+	.Slash_Eq            = "'/='",
+	.Percent_Eq          = "'%='",
+	.Caret_Eq            = "'^='",
+	.Amp_Eq              = "'&='",
+	.Pipe_Eq             = "'|='",
+	.Tilde_Eq            = "'~='",
+	.Lt_Lt_Eq            = "'<<='",
+	.Gt_Gt_Eq            = "'>>='",
 	.Semi                = "';'",
 	.Newline             = "a newline",
 	.Colon               = "':'",
@@ -207,17 +261,35 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	case '!':
 		token.tag = .Bang_Eq if match(t, '=') else .Bang
 	case '<':
-		token.tag = .Lt_Eq if match(t, '=') else .Lt
+		if match(t, '<') {
+			token.tag = .Lt_Lt_Eq if match(t, '=') else .Lt_Lt
+		} else {
+			token.tag = .Lt_Eq if match(t, '=') else .Lt
+		}
 	case '>':
-		token.tag = .Gt_Eq if match(t, '=') else .Gt
+		if match(t, '>') {
+			token.tag = .Gt_Gt_Eq if match(t, '=') else .Gt_Gt
+		} else {
+			token.tag = .Gt_Eq if match(t, '=') else .Gt
+		}
 	case '+':
-		token.tag = .Plus
+		token.tag = .Plus_Eq if match(t, '=') else .Plus
 	case '-':
-		token.tag = .Minus
+		token.tag = .Minus_Eq if match(t, '=') else .Minus
 	case '*':
-		token.tag = .Star
+		token.tag = .Star_Eq if match(t, '=') else .Star
 	case '/':
-		token.tag = .Slash
+		token.tag = .Slash_Eq if match(t, '=') else .Slash
+	case '%':
+		token.tag = .Percent_Eq if match(t, '=') else .Percent
+	case '^':
+		token.tag = .Caret_Eq if match(t, '=') else .Caret
+	case '&':
+		token.tag = .Amp_Eq if match(t, '=') else .Amp
+	case '|':
+		token.tag = .Pipe_Eq if match(t, '=') else .Pipe
+	case '~':
+		token.tag = .Tilde_Eq if match(t, '=') else .Tilde
 	case ';':
 		token.tag = .Semi
 	case ':':
@@ -242,27 +314,37 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	case '\n':
 		token.tag = .Newline
 
-	// TODO: add floating-point numbers and other formats. Only integers work now.
+	// The compiler checks the number's text, so this only finds where it ends.
 	case '0' ..= '9':
 		token.tag = .Number
-
-		for is_alphanumeric(peek(t)) || peek(t) == '_' {
-			if is_alpha(peek(t)) || peek(t) == '_' {
-				token.tag = .Invalid
+		prefixed := c == '0' && is_alpha(peek(t)) && peek(t) != 'e' && peek(t) != 'E'
+		skip_word(t)
+		if !prefixed {
+			// a fraction needs a digit after the '.', so `1..2` and `1.foo` aren't fractions
+			if peek(t) == '.' && is_numeric(peek_next(t)) {
+				t.offset += 1
+				skip_word(t)
 			}
-			t.offset += 1
+			// the exponent's sign, as in `1e-5` (the 'e' was part of the word)
+			last := t.source[t.offset - 1]
+			if (last == 'e' || last == 'E') && (peek(t) == '+' || peek(t) == '-') {
+				t.offset += 1
+				skip_word(t)
+			}
 		}
 
 	case '"':
 		token.tag = .String
-		for peek(t) != 0 && peek(t) != '"' {
+		for peek(t) != '"' {
+			if peek(t) == 0 || peek(t) == '\n' {
+				token.tag = .Invalid
+				break
+			}
+			// skip the escaped character, which may be a '"'
+			if peek(t) == '\\' && peek_next(t) != 0 && peek_next(t) != '\n' do t.offset += 1
 			t.offset += 1
 		}
-		if peek(t) == 0 {
-			token.tag = .Invalid
-		} else {
-			t.offset += 1
-		}
+		if token.tag == .String do t.offset += 1
 
 	case 'a' ..= 'z', 'A' ..= 'Z', '_':
 		token.tag = .Identifier
@@ -314,11 +396,11 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 	}
 
 	#partial switch token.tag {
-	case .Invalid:
-		break
 	case .Paren_Close,
 	     .Brace_Close,
 	     .Bracket_Close,
+	     // ending the line lets the parser recover after an invalid token, like an unterminated string
+	     .Invalid,
 	     .Number,
 	     .String,
 	     .Identifier,
@@ -338,6 +420,15 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 
 peek :: proc(t: ^Tokenizer) -> u8 {
 	return t.source[t.offset] if t.offset < len(t.source) else 0
+}
+
+peek_next :: proc(t: ^Tokenizer) -> u8 {
+	return t.source[t.offset + 1] if t.offset + 1 < len(t.source) else 0
+}
+
+// Skips letters, digits, and underscores.
+skip_word :: proc(t: ^Tokenizer) {
+	for is_alphanumeric(peek(t)) || peek(t) == '_' do t.offset += 1
 }
 
 // Consumes the next character if it's `c`.

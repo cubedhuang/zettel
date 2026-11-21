@@ -126,14 +126,26 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_string(w, "(! ")
 		render_node(w, ast, node.data.node, indent)
 		io.write_byte(w, ')')
+	case .Bit_Not:
+		io.write_string(w, "(~ ")
+		render_node(w, ast, node.data.node, indent)
+		io.write_byte(w, ')')
 	case .Echo:
 		io.write_string(w, "(echo ")
 		render_node(w, ast, node.data.node, indent)
 		io.write_byte(w, ')')
-	case .Add,
+	case .Compound_Assign,
+	     .Add,
 	     .Sub,
 	     .Mul,
 	     .Div,
+	     .Mod,
+	     .Pow,
+	     .Bit_And,
+	     .Bit_Or,
+	     .Bit_Xor,
+	     .Shift_Left,
+	     .Shift_Right,
 	     .Equal,
 	     .Not_Equal,
 	     .Less,

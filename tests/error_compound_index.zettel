@@ -1,0 +1,3 @@
+xs := [1]
+// the array shrinks before the element is assigned
+xs[0] += pop(xs) // error: index 0 is out of bounds for length 0

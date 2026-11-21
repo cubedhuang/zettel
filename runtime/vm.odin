@@ -113,6 +113,10 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 		case .Not:
 			operand := vm_pop(vm)
 			vm_push(vm, to_value(is_falsy(operand)))
+		case .Bit_Not:
+			operand, ok := as_u32(vm_pop(vm))
+			if !ok do return runtime_error(vm, chunk, start, BITWISE_ERROR)
+			vm_push(vm, to_value(f64(~operand)))
 		case .Add:
 			rhs, lhs := vm_pop(vm), vm_pop(vm)
 			if a, b, ok := as_numbers(lhs, rhs); ok {
@@ -146,36 +150,90 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 				return runtime_error(vm, chunk, start, "operands must be numbers")
 			}
 			vm_push(vm, to_value(lhs / rhs))
+		case .Mod:
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
+			vm_push(vm, to_value(floored_mod(lhs, rhs)))
+		case .Pow:
+			lhs, rhs, ok := pop_numbers(vm)
+			if !ok {
+				return runtime_error(vm, chunk, start, "operands must be numbers")
+			}
+			vm_push(vm, to_value(math.pow(lhs, rhs)))
+		case .Bit_And, .Bit_Or, .Bit_Xor:
+			rhs_value, lhs_value := vm_pop(vm), vm_pop(vm)
+			lhs, lhs_ok := as_u32(lhs_value)
+			rhs, rhs_ok := as_u32(rhs_value)
+			if !lhs_ok || !rhs_ok do return runtime_error(vm, chunk, start, BITWISE_ERROR)
+			result: u32
+			#partial switch op {
+			case .Bit_And:
+				result = lhs & rhs
+			case .Bit_Or:
+				result = lhs | rhs
+			case .Bit_Xor:
+				result = lhs ~ rhs
+			}
+			vm_push(vm, to_value(f64(result)))
+		case .Shift_Left, .Shift_Right:
+			rhs_value, lhs_value := vm_pop(vm), vm_pop(vm)
+			lhs, lhs_ok := as_u32(lhs_value)
+			if !lhs_ok do return runtime_error(vm, chunk, start, BITWISE_ERROR)
+			amount, is_number := as_number(rhs_value)
+			if !is_number || amount != math.trunc(amount) {
+				return runtime_error(vm, chunk, start, "shift amount must be an integer")
+			}
+			// a negative amount shifts the other way
+			if op == .Shift_Right do amount = -amount
+			result: u32
+			switch {
+			case amount <= -32 || amount >= 32:
+				result = 0
+			case amount >= 0:
+				result = lhs << uint(amount)
+			case:
+				result = lhs >> uint(-amount)
+			}
+			vm_push(vm, to_value(f64(result)))
 		case .Equal:
 			rhs, lhs := vm_pop(vm), vm_pop(vm)
 			vm_push(vm, to_value(values_equal(lhs, rhs)))
 		case .Not_Equal:
 			rhs, lhs := vm_pop(vm), vm_pop(vm)
 			vm_push(vm, to_value(!values_equal(lhs, rhs)))
-		case .Less:
-			lhs, rhs, ok := pop_numbers(vm)
-			if !ok {
-				return runtime_error(vm, chunk, start, "operands must be numbers")
+		case .Less, .Less_Equal, .Greater, .Greater_Equal:
+			rhs, lhs := vm_pop(vm), vm_pop(vm)
+			order: int
+			if a, b, ok := as_numbers(lhs, rhs); ok {
+				// nan isn't ordered, so every comparison with it is false
+				if a != a || b != b {
+					vm_push(vm, FALSE)
+					break
+				}
+				order = -1 if a < b else int(a > b)
+			} else if a, b, ok := as_strings(lhs, rhs); ok {
+				// byte by byte, like `strings.compare`
+				order = strings.compare(a.text, b.text)
+			} else {
+				return runtime_error(
+					vm,
+					chunk,
+					start,
+					"operands must be two numbers or two strings",
+				)
 			}
-			vm_push(vm, to_value(lhs < rhs))
-		case .Less_Equal:
-			lhs, rhs, ok := pop_numbers(vm)
-			if !ok {
-				return runtime_error(vm, chunk, start, "operands must be numbers")
+			#partial switch op {
+			case .Less:
+				vm_push(vm, to_value(order < 0))
+			case .Less_Equal:
+				vm_push(vm, to_value(order <= 0))
+			case .Greater:
+				vm_push(vm, to_value(order > 0))
+			case .Greater_Equal:
+				vm_push(vm, to_value(order >= 0))
 			}
-			vm_push(vm, to_value(lhs <= rhs))
-		case .Greater:
-			lhs, rhs, ok := pop_numbers(vm)
-			if !ok {
-				return runtime_error(vm, chunk, start, "operands must be numbers")
-			}
-			vm_push(vm, to_value(lhs > rhs))
-		case .Greater_Equal:
-			lhs, rhs, ok := pop_numbers(vm)
-			if !ok {
-				return runtime_error(vm, chunk, start, "operands must be numbers")
-			}
-			vm_push(vm, to_value(lhs >= rhs))
 		case .Jump:
 			ip += 2 + int(common.read_u16(chunk.code, ip))
 		case .Loop:
@@ -214,6 +272,17 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			} else {
 				vm.stack[upvalue.slot] = vm_pop(vm)
 			}
+		case .Get_Index_Keep:
+			index_value, indexed := vm.stack[len(vm.stack) - 1], vm.stack[len(vm.stack) - 2]
+			array, index, message := array_index(indexed, index_value)
+			if message != "" do return runtime_error(vm, chunk, start, message)
+			vm_push(vm, array.items[index])
+		case .Update_Index:
+			item, index_value, indexed := vm_pop(vm), vm_pop(vm), vm_pop(vm)
+			// check again, because the new element's expression may have shrunk the array
+			array, index, message := array_index(indexed, index_value)
+			if message != "" do return runtime_error(vm, chunk, start, message)
+			array.items[index] = item
 		case .Get_Index:
 			index_value, indexed := vm_pop(vm), vm_pop(vm)
 			array, index, message := array_index(indexed, index_value)
@@ -464,6 +533,23 @@ as_array :: proc(value: Value) -> (array: ^Obj_Array, ok: bool) {
 	obj := as_obj(value) or_return
 	if obj.tag != .Array do return nil, false
 	return (^Obj_Array)(obj), true
+}
+
+BITWISE_ERROR :: "bitwise operands must be 32-bit integers"
+
+// Converts an integer from -2^31 to 2^32 - 1 to 32 bits. Negative numbers wrap, like in two's
+// complement, so `-1` is `0xFFFF_FFFF`.
+as_u32 :: proc(value: Value) -> (result: u32, ok: bool) {
+	number := as_number(value) or_return
+	if number != math.trunc(number) || number < -(1 << 31) || number >= 1 << 32 do return 0, false
+	return u32(i64(number)), true
+}
+
+// The remainder of flooring division, which has the sign of `rhs`, like in Lua and Python.
+floored_mod :: proc(lhs, rhs: f64) -> f64 {
+	remainder := math.mod(lhs, rhs)
+	if remainder != 0 && (remainder < 0) != (rhs < 0) do remainder += rhs
+	return remainder
 }
 
 pop_numbers :: proc(vm: ^Vm) -> (lhs, rhs: f64, ok: bool) {

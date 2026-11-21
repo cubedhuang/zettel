@@ -13,8 +13,10 @@ Compiler :: struct {
 	chunk:               ^Chunk_Compiler,
 	functions:           [dynamic]common.Function,
 	string_bytes:        [dynamic]u8,
-	// The keys are slices of the source.
+	// The keys are slices of the source or of `decoded_strings`.
 	string_locations:    map[string]common.Constant_String,
+	// String literals with escapes, which `strconv.unquote_string` allocated.
+	decoded_strings:     [dynamic]string,
 
 	// Same format as `common.Static_Names`.
 	static_bytes:        [dynamic]u8,
@@ -113,6 +115,10 @@ Compile_Error_Tag :: enum u8 {
 	Redeclared,
 	// `node` is the target.
 	Invalid_Assignment_Target,
+	// `node` is the literal.
+	Invalid_Number,
+	// `node` is the literal.
+	Invalid_String,
 	// `node` is the assignment or declaration.
 	Too_Few_Values,
 	// `node` is the assignment or declaration.
@@ -146,12 +152,34 @@ binary_ops := #partial [Node_Tag]common.Op {
 	.Sub           = .Sub,
 	.Mul           = .Mul,
 	.Div           = .Div,
+	.Mod           = .Mod,
+	.Pow           = .Pow,
+	.Bit_And       = .Bit_And,
+	.Bit_Or        = .Bit_Or,
+	.Bit_Xor       = .Bit_Xor,
+	.Shift_Left    = .Shift_Left,
+	.Shift_Right   = .Shift_Right,
 	.Equal         = .Equal,
 	.Not_Equal     = .Not_Equal,
 	.Less          = .Less,
 	.Less_Equal    = .Less_Equal,
 	.Greater       = .Greater,
 	.Greater_Equal = .Greater_Equal,
+}
+
+// The instruction for each compound assignment operator.
+compound_ops := #partial [Token_Tag]common.Op {
+	.Plus_Eq    = .Add,
+	.Minus_Eq   = .Sub,
+	.Star_Eq    = .Mul,
+	.Slash_Eq   = .Div,
+	.Percent_Eq = .Mod,
+	.Caret_Eq   = .Pow,
+	.Amp_Eq     = .Bit_And,
+	.Pipe_Eq    = .Bit_Or,
+	.Tilde_Eq   = .Bit_Xor,
+	.Lt_Lt_Eq   = .Shift_Left,
+	.Gt_Gt_Eq   = .Shift_Right,
 }
 
 // `statics` are the names of statics declared by earlier compilations of the same class, such as
@@ -177,6 +205,10 @@ compile :: proc(
 		echo_statements     = echo_statements,
 	}
 	defer delete(c.string_locations)
+	defer {
+		for s in c.decoded_strings do delete(s)
+		delete(c.decoded_strings)
+	}
 	defer delete(c.static_slots)
 	defer delete(c.static_visible)
 	defer delete(c.reported_names)
@@ -268,6 +300,8 @@ compile_statement :: proc(c: ^Compiler, index: Node_Index) {
 		end_scope(c, token_span(c.ast, last_token(c.ast, index)))
 	case .Assign, .Assign_Multi:
 		compile_assign(c, index)
+	case .Compound_Assign:
+		compile_compound_assign(c, index)
 	case .Decl, .Decl_Multi:
 		compile_decl(c, index)
 	case .If_Simple, .If:
@@ -329,15 +363,43 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 			continue
 		}
 		variable, _ := resolve(c, target)
-		#partial switch variable.kind {
-		case .Static:
-			emit_variable(c, .Set_Static, variable, span)
-		case .Local:
-			emit_variable(c, .Set_Local, variable, span)
-		case .Upvalue:
-			emit(c, .Set_Upvalue, span)
-			emit_byte(c, u8(variable.slot), span)
+		emit_set(c, variable, span)
+	}
+}
+
+compile_compound_assign :: proc(c: ^Compiler, index: Node_Index) {
+	node := c.ast.nodes[index]
+	target, value := node.data.node_and_node.lhs, node.data.node_and_node.rhs
+	op := compound_ops[c.ast.tokens[node.main_token].tag]
+	span := node_span(c.ast, index)
+
+	#partial switch c.ast.nodes[target].tag {
+	case .Index:
+		// the indexed value and the index are evaluated once
+		compile_expression(c, c.ast.nodes[target].data.node_and_node.lhs)
+		compile_expression(c, c.ast.nodes[target].data.node_and_node.rhs)
+		emit(c, .Get_Index_Keep, node_span(c.ast, target))
+		compile_expression(c, value)
+		emit(c, op, span)
+		emit(c, .Update_Index, node_span(c.ast, target))
+	case .Identifier:
+		variable, ok := resolve(c, target)
+		if ok && variable.kind == .Builtin {
+			fail(c, .Assign_To_Builtin, target)
+			ok = false
 		}
+		if !ok {
+			compile_expression(c, value)
+			return
+		}
+		target_span := node_span(c.ast, target)
+		emit_get(c, variable, target_span)
+		compile_expression(c, value)
+		emit(c, op, span)
+		emit_set(c, variable, target_span)
+	case:
+		fail(c, .Invalid_Assignment_Target, target)
+		compile_expression(c, value)
 	}
 }
 
@@ -577,13 +639,14 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	span := node_span(c.ast, index)
 	#partial switch node.tag {
 	case .Number_Literal:
-		// TODO: better numbers
-		value, _ := strconv.parse_f64(token_text(c.ast, node.main_token))
+		value, ok := parse_number(token_text(c.ast, node.main_token))
+		if !ok do fail(c, .Invalid_Number, index)
 		emit_constant(c, value, index)
 	case .String_Literal:
-		// TODO: better strings
-		value := add_string(c, token_text(c.ast, node.main_token))
-		emit_constant(c, value, index)
+		text, allocated, ok := strconv.unquote_string(token_text(c.ast, node.main_token))
+		if !ok do fail(c, .Invalid_String, index)
+		if allocated do append(&c.decoded_strings, text)
+		emit_constant(c, add_string_bytes(c, text), index)
 	case .Nil_Literal:
 		emit(c, .Nil, span)
 	case .True_Literal:
@@ -592,18 +655,7 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		emit(c, .False, span)
 	case .Identifier:
 		variable := resolve(c, index) or_break
-		switch variable.kind {
-		case .Static:
-			emit_variable(c, .Get_Static, variable, span)
-		case .Local:
-			emit_variable(c, .Get_Local, variable, span)
-		case .Upvalue:
-			emit(c, .Get_Upvalue, span)
-			emit_byte(c, u8(variable.slot), span)
-		case .Builtin:
-			emit(c, .Get_Builtin, span)
-			emit_byte(c, u8(variable.slot), span)
-		}
+		emit_get(c, variable, span)
 	case .Grouped:
 		compile_expression(c, node.data.token_and_node.node)
 	case .Negate:
@@ -612,6 +664,9 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Not:
 		compile_expression(c, node.data.node)
 		emit(c, .Not, span)
+	case .Bit_Not:
+		compile_expression(c, node.data.node)
+		emit(c, .Bit_Not, span)
 	case .Echo:
 		compile_expression(c, node.data.node)
 		emit(c, .Echo, span)
@@ -633,7 +688,23 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		emit(c, .Pop, span)
 		compile_expression(c, node.data.node_and_node.rhs)
 		patch_jump(c, jump, index)
-	case .Add, .Sub, .Mul, .Div, .Equal, .Not_Equal, .Less, .Less_Equal, .Greater, .Greater_Equal:
+	case .Add,
+	     .Sub,
+	     .Mul,
+	     .Div,
+	     .Mod,
+	     .Pow,
+	     .Bit_And,
+	     .Bit_Or,
+	     .Bit_Xor,
+	     .Shift_Left,
+	     .Shift_Right,
+	     .Equal,
+	     .Not_Equal,
+	     .Less,
+	     .Less_Equal,
+	     .Greater,
+	     .Greater_Equal:
 		compile_expression(c, node.data.node_and_node.lhs)
 		compile_expression(c, node.data.node_and_node.rhs)
 		emit(c, binary_ops[node.tag], span)
@@ -854,6 +925,37 @@ emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: com
 	emit_u16(c, variable.slot, span)
 }
 
+// Pushes the variable's value.
+emit_get :: proc(c: ^Compiler, variable: Variable, span: common.Span) {
+	switch variable.kind {
+	case .Static:
+		emit_variable(c, .Get_Static, variable, span)
+	case .Local:
+		emit_variable(c, .Get_Local, variable, span)
+	case .Upvalue:
+		emit(c, .Get_Upvalue, span)
+		emit_byte(c, u8(variable.slot), span)
+	case .Builtin:
+		emit(c, .Get_Builtin, span)
+		emit_byte(c, u8(variable.slot), span)
+	}
+}
+
+// Pops a value into the variable, which can't be a builtin.
+emit_set :: proc(c: ^Compiler, variable: Variable, span: common.Span) {
+	#partial switch variable.kind {
+	case .Static:
+		emit_variable(c, .Set_Static, variable, span)
+	case .Local:
+		emit_variable(c, .Set_Local, variable, span)
+	case .Upvalue:
+		emit(c, .Set_Upvalue, span)
+		emit_byte(c, u8(variable.slot), span)
+	case:
+		unreachable()
+	}
+}
+
 // `node` is the source of the constant.
 emit_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index) {
 	index := add_constant(c, constant, node)
@@ -913,11 +1015,6 @@ add_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index) 
 	return index
 }
 
-// `source` includes the quotes.
-add_string :: proc(c: ^Compiler, source: string) -> common.Constant_String {
-	return add_string_bytes(c, source[1:len(source) - 1])
-}
-
 add_string_bytes :: proc(c: ^Compiler, str: string) -> common.Constant_String {
 	if value, ok := c.string_locations[str]; ok {
 		return value
@@ -934,6 +1031,19 @@ add_string_bytes :: proc(c: ^Compiler, str: string) -> common.Constant_String {
 	c.string_locations[str] = value
 
 	return value
+}
+
+// Parses a number literal: decimal with an optional fraction and exponent, or an integer with one
+// of Odin's prefixes (`0b`, `0o`, `0d`, `0z`, or `0x`). Any of these can contain `_` separators.
+parse_number :: proc(text: string) -> (value: f64, ok: bool) {
+	if len(text) > 1 && text[0] == '0' && is_alpha(text[1]) && text[1] != 'e' && text[1] != 'E' {
+		n: int
+		integer := strconv.parse_u64_maybe_prefixed(text, &n) or_return
+		return f64(integer), n == len(text)
+	}
+	n: int
+	value = strconv.parse_f64(text, &n) or_return
+	return value, n == len(text)
 }
 
 // Compilation continues after an error to find more errors.
@@ -1034,6 +1144,13 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 			"can't assign to builtin '%v'",
 			token_text(ast, ast.nodes[error.node].main_token),
 		)
+	case .Invalid_Number:
+		return fmt.tprintf(
+			"invalid number '%v'",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Invalid_String:
+		return "invalid escape sequence in string"
 	}
 	unreachable()
 }

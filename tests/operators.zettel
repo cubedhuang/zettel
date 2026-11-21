@@ -1,0 +1,46 @@
+// % is floored: the result has the sign of the divisor
+echo 7 % 3    // expect: 1
+echo -7 % 3   // expect: 2
+echo 7 % -3   // expect: -2
+echo 7.5 % 2  // expect: 1.5
+echo 1 % 0    // expect: nan
+echo 2 * 5 % 3 // expect: 1
+
+// ^ is power, right-associative, and binds tighter than * and /
+echo 2 ^ 10    // expect: 1024
+echo 2 ^ 3 ^ 2 // expect: 512
+echo 2 * 3 ^ 2 // expect: 18
+echo 2 ^ -1    // expect: 0.5
+echo (-2) ^ 2  // expect: 4
+echo -(2 ^ 2)  // expect: -4
+
+// bitwise operators work on 32-bit integers and give unsigned results
+echo 12 & 10     // expect: 8
+echo 12 | 10     // expect: 14
+echo 12 ~ 10     // expect: 6
+echo ~0          // expect: 4294967295
+echo -1 & 0xFF   // expect: 255
+echo 0xFFFFFFFF | 0 // expect: 4294967295
+echo 1 << 31     // expect: 2147483648
+echo 0x80000000 >> 31 // expect: 1
+echo 1 << 32     // expect: 0
+echo 8 >> -1     // expect: 16
+echo 1 | 2 | 4   // expect: 7
+
+// bitwise operators bind tighter than comparisons
+echo 6 & 1 == 0  // expect: true
+echo (1 + 2) & 3 // expect: 3
+
+// strings compare byte by byte
+echo "apple" < "banana" // expect: true
+echo "b" <= "a"         // expect: false
+echo "" < "a"           // expect: true
+echo "Z" < "a"          // expect: true
+echo "ab" > "a"         // expect: true
+
+// nan isn't ordered
+echo 0 / 0 < 1  // expect: false
+echo 0 / 0 >= 1 // expect: false
+
+// parentheses allow what chaining doesn't
+echo (1 < 2) == (2 < 3) // expect: true

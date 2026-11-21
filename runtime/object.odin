@@ -207,9 +207,12 @@ write_obj :: proc(w: io.Writer, obj: ^Obj, quote_strings := true, writing: ^Writ
 	switch obj.tag {
 	case .String:
 		s := (^Obj_String)(obj)
-		if quote_strings do io.write_byte(w, '"')
-		io.write_string(w, s.text)
-		if quote_strings do io.write_byte(w, '"')
+		if quote_strings {
+			// escaped the way string literals are, so the output reads back as the same string
+			io.write_quoted_string(w, s.text)
+		} else {
+			io.write_string(w, s.text)
+		}
 	case .Class:
 		io.write_string(w, "<class ")
 		io.write_string(w, (^Obj_Class)(obj).name.text)

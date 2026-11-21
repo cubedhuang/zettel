@@ -21,6 +21,7 @@ Op :: enum u8 {
 	// Pops one value from the stack.
 	Negate,
 	Not,
+	Bit_Not,
 	// Binary
 	//
 	// Pops two values from the stack.
@@ -28,6 +29,13 @@ Op :: enum u8 {
 	Sub,
 	Mul,
 	Div,
+	Mod,
+	Pow,
+	Bit_And,
+	Bit_Or,
+	Bit_Xor,
+	Shift_Left,
+	Shift_Right,
 	Equal,
 	Not_Equal,
 	Less,
@@ -62,6 +70,11 @@ Op :: enum u8 {
 	// Pops the index, then the indexed value, then the new element. The element is below the
 	// others so that assignments can evaluate all their values first.
 	Set_Index,
+	// Like `Get_Index`, but leaves the indexed value and the index below the element. Compound
+	// assignment uses it before `Update_Index`.
+	Get_Index_Keep,
+	// Pops the new element, then the index, then the indexed value.
+	Update_Index,
 	// Functions
 	//
 	// Pushes a new closure of a function that captures variables. The operand is the index of

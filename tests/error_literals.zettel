@@ -1,0 +1,6 @@
+// number and string literals are checked when compiling
+a := 0x          // error: invalid number '0x'
+b := 0q10        // error: invalid number '0q10'
+c := 12abc       // error: invalid number '12abc'
+d := 1e400       // error: invalid number '1e400'
+e := "bad \q"    // error: invalid escape sequence in string

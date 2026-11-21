@@ -1,0 +1,21 @@
+// numbers can have fractions, exponents, prefixes, and separators
+echo 2.5         // expect: 2.5
+echo 1.5e3       // expect: 1500
+echo 1e-3        // expect: 0.001
+echo 2E+2        // expect: 200
+echo 1_000_000   // expect: 1000000
+echo 0xFF        // expect: 255
+echo 0xff_ff     // expect: 65535
+echo 0b1010      // expect: 10
+echo 0o17        // expect: 15
+echo 0d10        // expect: 10
+echo 0z10        // expect: 12
+
+// strings have escapes, and echo writes them back the same way
+echo "tab\there"   // expect: "tab\there"
+echo "say \"hi\""  // expect: "say \"hi\""
+echo "back\\slash" // expect: "back\\slash"
+echo "\x41é"  // expect: "Aé"
+echo len("\n")     // expect: 1
+print("a\tb")      // expect: a	b
+print("\"quoted\"") // expect: "quoted"

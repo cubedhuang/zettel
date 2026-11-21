@@ -1,1 +1,1 @@
-echo 1 < "a" // error: operands must be numbers
+echo 1 < "a" // error: operands must be two numbers or two strings

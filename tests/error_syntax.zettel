@@ -35,5 +35,21 @@ fn rest_first(..a, b) {} // error: a rest parameter must be the last parameter
 fn rest_no_name(..) {}   // error: expected an identifier, got ')'
 spread_alone := ..[1]    // error: expected expression, got '..'
 
+// unclear operator combinations need parentheses
+chained := 1 < 2 < 3     // error: comparisons can't be chained; use 'and' or parentheses
+chained_eq := 1 < 2 == 3 // error: comparisons can't be chained; use 'and' or parentheses
+mixed := 1 + 2 & 3       // error: '+' and '&' need parentheses to show which applies first
+mixed_bits := 1 | 2 & 3  // error: '|' and '&' need parentheses to show which applies first
+same_level := 1 | 2 ~ 3  // error: '~' and '|' need parentheses to show which applies first
+shifted := 1 << 2 - 1    // error: '-' and '<<' need parentheses to show which applies first
+power := -2 ^ 2          // error: '-' and '^' need parentheses to show which applies first
+
+// compound assignment takes one target and one value
+compound_a, compound_b += 1 // error: '+=' takes one target and one value
+compound_c -= 1, 2          // error: '-=' takes one target and one value
+
+// strings end on the same line
+unterminated := "no end // error: expected expression, got an unterminated string
+
 // a trailing operator continues the expression onto the next line
 echo 1 +     // error: expected expression, got end of input

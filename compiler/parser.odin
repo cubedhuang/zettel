@@ -150,6 +150,7 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	     .Bracket_Open,
 	     .Minus,
 	     .Bang,
+	     .Tilde,
 	     .Keyword_Echo:
 	case:
 		add_error(p, {tag = .Expected_Statement})
@@ -311,7 +312,7 @@ parse_else :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 parse_condition :: proc(p: ^Parser) -> (init, condition: Node_Index, ok: bool) {
 	first := parse_simple_stmt(p) or_return
 	#partial switch p.nodes[first].tag {
-	case .Assign, .Assign_Multi, .Decl, .Decl_Multi:
+	case .Assign, .Assign_Multi, .Decl, .Decl_Multi, .Compound_Assign:
 		init = first
 		expect(p, .Semi) or_return
 	case:
@@ -326,6 +327,7 @@ parse_condition :: proc(p: ^Parser) -> (init, condition: Node_Index, ok: bool) {
 // SimpleStmt <- Expr
 //             / AssignStmt
 //             / DeclStmt
+//             / CompoundAssignStmt
 //
 // AssignStmt <- Exprs EQ Exprs
 //
@@ -342,6 +344,18 @@ parse_simple_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		is_decl = true
 		advance(p)
 		eq = expect(p, .Eq) or_return
+	case .Plus_Eq,
+	     .Minus_Eq,
+	     .Star_Eq,
+	     .Slash_Eq,
+	     .Percent_Eq,
+	     .Caret_Eq,
+	     .Amp_Eq,
+	     .Pipe_Eq,
+	     .Tilde_Eq,
+	     .Lt_Lt_Eq,
+	     .Gt_Gt_Eq:
+		return parse_compound_assign(p, lhs)
 	case:
 		if expr, ok := lhs.(Node_Index); ok {
 			return expr, ok
@@ -402,6 +416,32 @@ parse_simple_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	return node, true
 }
 
+// CompoundAssignStmt <- Expr CompoundOp Expr
+//
+// `lhs` was already parsed.
+parse_compound_assign :: proc(p: ^Parser, lhs: Exprs) -> (node: Node_Index, ok: bool) {
+	operator := advance(p)
+	target, is_single := lhs.(Node_Index)
+	if !is_single {
+		add_error(p, {tag = .Compound_Assign_Multi, token = operator})
+		return
+	}
+	value := parse_expression(p) or_return
+	if peek_tag(p) == .Comma {
+		add_error(p, {tag = .Compound_Assign_Multi, token = operator})
+		return
+	}
+	return add_node(
+			p,
+			{
+				tag = .Compound_Assign,
+				main_token = operator,
+				data = {node_and_node = {target, value}},
+			},
+		),
+		true
+}
+
 // Exprs <- Expr (COMMA Expr)*
 parse_exprs :: proc(p: ^Parser) -> (exprs: Exprs, ok: bool) {
 	scratch_top := len(p.scratch)
@@ -452,7 +492,9 @@ parse_expression :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, 
 		if precedence <= min_precedence do break
 
 		operator := advance(p)
-		rhs := parse_expression(p, precedence) or_return
+		// `^` is right-associative, so its right side can hold another `^`
+		rhs := parse_expression(p, precedence - 1 if tag == .Pow else precedence) or_return
+		check_operands(p, tag, operator, node, rhs) or_return
 		node = add_node(
 			p,
 			{tag = tag, main_token = operator, data = {node_and_node = {node, rhs}}},
@@ -462,14 +504,17 @@ parse_expression :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, 
 	return node, true
 }
 
-// PRECEDENCE:
+// PRECEDENCE (like Odin's):
 //
 // Or              or
 // And             and
-// Equality        == !=
-// Comparison      < <= > >=
-// Addition        + -
-// Multiplication  * /
+// Comparison      == != < <= > >=   (can't be chained)
+// Addition        + - | ~
+// Multiplication  * / % & << >>
+// Power           ^                 (right-associative, tighter than unary operators)
+//
+// Bitwise operators can't be mixed with arithmetic or other bitwise operators without parentheses,
+// so sharing levels with arithmetic only decides which error is reported.
 binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 	#partial switch tag {
 	case .Keyword_Or:
@@ -481,23 +526,97 @@ binary_op :: proc(tag: Token_Tag) -> (Node_Tag, int) {
 	case .Bang_Eq:
 		return .Not_Equal, 3
 	case .Lt:
-		return .Less, 4
+		return .Less, 3
 	case .Lt_Eq:
-		return .Less_Equal, 4
+		return .Less_Equal, 3
 	case .Gt:
-		return .Greater, 4
+		return .Greater, 3
 	case .Gt_Eq:
-		return .Greater_Equal, 4
+		return .Greater_Equal, 3
 	case .Plus:
-		return .Add, 5
+		return .Add, 4
 	case .Minus:
-		return .Sub, 5
+		return .Sub, 4
+	case .Pipe:
+		return .Bit_Or, 4
+	case .Tilde:
+		return .Bit_Xor, 4
 	case .Star:
-		return .Mul, 6
+		return .Mul, 5
 	case .Slash:
-		return .Div, 6
+		return .Div, 5
+	case .Percent:
+		return .Mod, 5
+	case .Amp:
+		return .Bit_And, 5
+	case .Lt_Lt:
+		return .Shift_Left, 5
+	case .Gt_Gt:
+		return .Shift_Right, 5
+	case .Caret:
+		return .Pow, 6
 	}
 	return .Root, 0
+}
+
+Operator_Group :: enum u8 {
+	None,
+	Comparison,
+	Arithmetic,
+	Bitwise,
+}
+
+operator_group :: proc(tag: Node_Tag) -> Operator_Group {
+	#partial switch tag {
+	case .Equal, .Not_Equal, .Less, .Less_Equal, .Greater, .Greater_Equal:
+		return .Comparison
+	case .Add, .Sub, .Mul, .Div, .Mod, .Pow:
+		return .Arithmetic
+	case .Bit_And, .Bit_Or, .Bit_Xor, .Shift_Left, .Shift_Right:
+		return .Bitwise
+	}
+	return .None
+}
+
+// Reports operator combinations whose meaning isn't obvious, which need parentheses instead.
+check_operands :: proc(
+	p: ^Parser,
+	tag: Node_Tag,
+	operator: Token_Index,
+	lhs, rhs: Node_Index,
+) -> (
+	ok: bool,
+) {
+	#partial switch p.nodes[lhs].tag {
+	case .Negate, .Not, .Bit_Not:
+		if tag == .Pow {
+			add_error(p, {tag = .Unary_Before_Power, token = p.nodes[lhs].main_token})
+			return false
+		}
+	}
+
+	group := operator_group(tag)
+	for operand in ([2]Node_Index{lhs, rhs}) {
+		operand_tag := p.nodes[operand].tag
+		operand_group := operator_group(operand_tag)
+		mixed: bool
+		switch {
+		case group == .Comparison && operand_group == .Comparison:
+			add_error(p, {tag = .Chained_Comparison, token = operator})
+			return false
+		case group == .Bitwise:
+			mixed =
+				operand_group == .Arithmetic || (operand_group == .Bitwise && operand_tag != tag)
+		case group == .Arithmetic:
+			mixed = operand_group == .Bitwise
+		}
+		if mixed {
+			other := p.tokens[p.nodes[operand].main_token].tag
+			add_error(p, {tag = .Mixed_Operators, token = operator, other = other})
+			return false
+		}
+	}
+	return true
 }
 
 // When you change these, also change FIRST(Expr) in `parse_stmt`.
@@ -512,6 +631,8 @@ parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 		tag = .Negate
 	case .Bang:
 		tag = .Not
+	case .Tilde:
+		tag = .Bit_Not
 	case .Keyword_Echo:
 		echo := advance(p)
 		operand := parse_expression(p) or_return

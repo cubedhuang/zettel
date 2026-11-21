@@ -1,0 +1,3 @@
+// a static shadows a builtin everywhere in its class
+fn print(x) { echo x }
+print("quoted") // expect: "quoted"

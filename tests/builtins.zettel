@@ -1,0 +1,27 @@
+// print writes its arguments without quotes, separated by spaces
+print("hello") // expect: hello
+print("a", 1, true, nil) // expect: a 1 true nil
+print("x" + "y", 1 + 2) // expect: xy 3
+
+// print produces nil
+echo print("first") // expect: first
+// expect: nil
+
+// builtins are values
+echo print // expect: <fn print>
+p := print
+p("through a static") // expect: through a static
+fn apply(f, value) { return f(value) }
+apply(print, "through a parameter") // expect: through a parameter
+
+// locals and statics shadow builtins
+{
+    print := "shadowed"
+    echo print // expect: "shadowed"
+}
+fn shadowing() {
+    print := 1
+    return print
+}
+echo shadowing() // expect: 1
+print("still the builtin") // expect: still the builtin

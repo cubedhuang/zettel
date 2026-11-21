@@ -62,7 +62,9 @@ Variable :: struct {
 	kind: enum u8 {
 		Static,
 		Local,
+		Builtin,
 	},
+	// static_slots, locals, or builtin index
 	slot: int,
 }
 
@@ -127,6 +129,8 @@ Compile_Error_Tag :: enum u8 {
 	Capture_Unsupported,
 	// `node` is the identifier.
 	Used_Before_Declaration,
+	// `node` is the identifier.
+	Assign_To_Builtin,
 }
 
 error_message :: proc {
@@ -196,6 +200,11 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 	case .Used_Before_Declaration:
 		return fmt.tprintf(
 			"'%v' is used before its declaration",
+			token_text(ast, ast.nodes[error.node].main_token),
+		)
+	case .Assign_To_Builtin:
+		return fmt.tprintf(
+			"can't assign to builtin '%v'",
 			token_text(ast, ast.nodes[error.node].main_token),
 		)
 	}
@@ -364,13 +373,15 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .False_Literal:
 		emit(c, .False, span)
 	case .Identifier:
-		if variable, ok := resolve(c, index); ok {
-			emit_variable(
-				c,
-				.Get_Static if variable.kind == .Static else .Get_Local,
-				variable,
-				span,
-			)
+		variable := resolve(c, index) or_break
+		switch variable.kind {
+		case .Static:
+			emit_variable(c, .Get_Static, variable, span)
+		case .Local:
+			emit_variable(c, .Get_Local, variable, span)
+		case .Builtin:
+			emit(c, .Get_Builtin, span)
+			emit_byte(c, u8(variable.slot), span)
 		}
 	case .Grouped:
 		compile_expression(c, node.data.token_and_node.node)
@@ -635,7 +646,10 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 		if c.ast.nodes[target].tag != .Identifier {
 			fail(c, .Invalid_Assignment_Target, target)
 			valid = false
-		} else if _, ok := resolve(c, target); !ok {
+		} else if variable, ok := resolve(c, target); !ok {
+			valid = false
+		} else if variable.kind == .Builtin {
+			fail(c, .Assign_To_Builtin, target)
 			valid = false
 		}
 	}
@@ -734,6 +748,9 @@ resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok
 			return
 		}
 		return {.Static, slot}, true
+	}
+	for builtin_name, builtin in common.builtin_names {
+		if builtin_name == name do return {.Builtin, int(builtin)}, true
 	}
 	fail(c, .Undeclared, identifier)
 	return

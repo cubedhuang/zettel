@@ -129,9 +129,8 @@ run :: proc(source: ^common.Source, out: io.Writer) -> (errors: [dynamic]Diagnos
 	}
 	defer common.module_destroy(&module)
 
-	vm := runtime.Vm {
-		out = out,
-	}
+	vm: runtime.Vm
+	runtime.vm_init(&vm, out)
 	defer runtime.vm_destroy(&vm)
 	if runtime_error, ok := runtime.run(&vm, runtime.load(&vm, source, module)); !ok {
 		error_source := &vm.sources[runtime_error.source]

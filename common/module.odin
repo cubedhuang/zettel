@@ -11,6 +11,15 @@ Module :: struct {
 	string_bytes: []u8,
 }
 
+// Natives every class can use, like Go's universe scope. Statics and locals shadow them.
+Builtin :: enum u8 {
+	Print,
+}
+
+builtin_names := [Builtin]string {
+	.Print = "print",
+}
+
 // Names of a class's static variables.
 Static_Names :: struct {
 	bytes: []u8,
@@ -94,6 +103,8 @@ Op :: enum u8 {
 	Set_Static,
 	Get_Local,
 	Set_Local,
+	// The operand is a `Builtin`.
+	Get_Builtin,
 	// Functions
 	//
 	// Calls the value below its arguments, which are on top of the stack. The operand is the
@@ -117,6 +128,7 @@ op_operand_size := #partial [Op]int {
 	.Set_Static    = 2,
 	.Get_Local     = 2,
 	.Set_Local     = 2,
+	.Get_Builtin   = 1,
 	.Call          = 1,
 }
 

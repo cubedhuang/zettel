@@ -21,12 +21,12 @@ TRUE :: Value(QNAN | TAG_TRUE)
 // Static variables whose declaration hasn't run yet.
 UNDEFINED :: Value(QNAN | TAG_UNDEFINED)
 
-write_value :: proc(w: io.Writer, value: Value) {
+write_value :: proc(w: io.Writer, value: Value, quote_strings := true) {
 	switch {
 	case is_number(value):
 		write_number(w, to_number(value))
 	case is_obj(value):
-		write_obj(w, to_obj(value))
+		write_obj(w, to_obj(value), quote_strings)
 	case value == NIL:
 		io.write_string(w, "nil")
 	case value == TRUE:
@@ -59,13 +59,13 @@ write_number :: proc(w: io.Writer, number: f64) {
 	io.write_string(w, text)
 }
 
-write_obj :: proc(w: io.Writer, obj: ^Obj) {
+write_obj :: proc(w: io.Writer, obj: ^Obj, quote_strings := true) {
 	switch obj.tag {
 	case .String:
 		s := (^Obj_String)(obj)
-		io.write_byte(w, '"')
+		if quote_strings do io.write_byte(w, '"')
 		io.write_string(w, s.text)
-		io.write_byte(w, '"')
+		if quote_strings do io.write_byte(w, '"')
 	case .Class:
 		io.write_string(w, "<class ")
 		io.write_string(w, (^Obj_Class)(obj).name.text)
@@ -77,6 +77,10 @@ write_obj :: proc(w: io.Writer, obj: ^Obj) {
 			io.write_byte(w, ' ')
 			io.write_string(w, function.name.text)
 		}
+		io.write_byte(w, '>')
+	case .Native:
+		io.write_string(w, "<fn ")
+		io.write_string(w, (^Obj_Native)(obj).name.text)
 		io.write_byte(w, '>')
 	}
 }
@@ -90,6 +94,7 @@ Obj_Tag :: enum u8 {
 	String,
 	Class,
 	Function,
+	Native,
 }
 
 Obj_String :: struct {
@@ -114,6 +119,14 @@ Obj_Function :: struct {
 	class:     ^Obj_Class,
 }
 
+Obj_Native :: struct {
+	using obj: Obj,
+	name:      ^Obj_String,
+	// `VARIADIC` for any number of arguments.
+	arity:     int,
+	procedure: Native_Proc,
+}
+
 obj_free :: proc(obj: ^Obj) {
 	switch obj.tag {
 	case .String:
@@ -128,6 +141,8 @@ obj_free :: proc(obj: ^Obj) {
 		function := (^Obj_Function)(obj)
 		chunk_destroy(&function.chunk)
 		free(function)
+	case .Native:
+		free((^Obj_Native)(obj))
 	}
 }
 

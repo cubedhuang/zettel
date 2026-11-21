@@ -52,6 +52,8 @@ disassemble_chunk :: proc(w: io.Writer, module: Module, chunk: Chunk) {
 			fmt.wprintf(w, " [%v] %v", slot, static_name(module.statics, int(slot)), flush = false)
 		case .Get_Local, .Set_Local:
 			fmt.wprintf(w, " [%v]", read_u16(chunk.code, offset + 1), flush = false)
+		case .Get_Builtin:
+			fmt.wprintf(w, " %v", builtin_names[Builtin(chunk.code[offset + 1])], flush = false)
 		case .Call:
 			fmt.wprintf(w, " (%v)", chunk.code[offset + 1], flush = false)
 		}

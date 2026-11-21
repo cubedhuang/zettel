@@ -15,7 +15,8 @@ Vm :: struct {
 	objects: ^Obj,
 	strings: map[string]^Obj_String,
 	// path --> root class. Keys are owned.
-	modules: map[string]^Obj_Class,
+	modules:  map[string]^Obj_Class,
+	builtins: [common.Builtin]Value,
 }
 
 Frame :: struct {
@@ -24,6 +25,19 @@ Frame :: struct {
 	ip:       int,
 	// Stack index of the frame's first local. The callee is right below it.
 	base:     int,
+}
+
+vm_init :: proc(vm: ^Vm, out: io.Writer) {
+	vm.out = out
+	for native, builtin in builtin_natives {
+		obj := new(Obj_Native)
+		obj.tag = .Native
+		obj.name = intern_clone(vm, common.builtin_names[builtin])
+		obj.arity = native.arity
+		obj.procedure = native.procedure
+		track(vm, obj)
+		vm.builtins[builtin] = to_value(obj)
+	}
 }
 
 vm_destroy :: proc(vm: ^Vm) {
@@ -170,6 +184,9 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 		case .Set_Static:
 			statics[common.read_u16(chunk.code, ip)] = vm_pop(vm)
 			ip += 2
+		case .Get_Builtin:
+			vm_push(vm, vm.builtins[common.Builtin(chunk.code[ip])])
+			ip += 1
 		case .Get_Local:
 			vm_push(vm, vm.stack[base + int(common.read_u16(chunk.code, ip))])
 			ip += 2
@@ -180,18 +197,25 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 			arg_count := int(chunk.code[ip])
 			ip += 1
 			callee, is_obj := as_obj(vm.stack[len(vm.stack) - arg_count - 1])
-			if !is_obj || callee.tag != .Function {
+			if !is_obj || (callee.tag != .Function && callee.tag != .Native) {
 				return runtime_error(vm, chunk, start, "can only call functions")
 			}
+			if callee.tag == .Native {
+				native := (^Obj_Native)(callee)
+				if native.arity != VARIADIC && arg_count != native.arity {
+					return runtime_error(vm, chunk, start, arity_message(native.arity, arg_count))
+				}
+				args_start := len(vm.stack) - arg_count
+				result, error := native.procedure(vm, vm.stack[args_start:])
+				if error != "" do return runtime_error(vm, chunk, start, error)
+				resize(&vm.stack, args_start - 1)
+				vm_push(vm, result)
+				break
+			}
+
 			function := (^Obj_Function)(callee)
 			if arg_count != function.arity {
-				message := fmt.tprintf(
-					"expected %v argument%v, got %v",
-					function.arity,
-					"" if function.arity == 1 else "s",
-					arg_count,
-				)
-				return runtime_error(vm, chunk, start, message)
+				return runtime_error(vm, chunk, start, arity_message(function.arity, arg_count))
 			}
 			if len(vm.frames) >= MAX_FRAMES {
 				return runtime_error(vm, chunk, start, "stack overflow")
@@ -225,6 +249,11 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 			io.write_byte(vm.out, '\n')
 		}
 	}
+}
+
+// Uses `context.temp_allocator`.
+arity_message :: proc(expected, got: int) -> string {
+	return fmt.tprintf("expected %v argument%v, got %v", expected, "" if expected == 1 else "s", got)
 }
 
 runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runtime_Error, bool) {

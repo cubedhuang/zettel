@@ -15,9 +15,8 @@ Repl :: struct {
 }
 
 repl :: proc(r: Reporter) {
-	state := Repl {
-		vm = {out = os.to_writer(os.stdout)},
-	}
+	state: Repl
+	runtime.vm_init(&state.vm, os.to_writer(os.stdout))
 	defer runtime.vm_destroy(&state.vm)
 	defer common.static_names_destroy(&state.statics)
 

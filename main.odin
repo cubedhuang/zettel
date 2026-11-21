@@ -85,9 +85,8 @@ main :: proc() {
 		return
 	}
 
-	vm := runtime.Vm {
-		out = os.to_writer(os.stdout),
-	}
+	vm: runtime.Vm
+	runtime.vm_init(&vm, os.to_writer(os.stdout))
 	defer runtime.vm_destroy(&vm)
 	if !execute(reporter, &source, &vm, module) do os.exit(1)
 }

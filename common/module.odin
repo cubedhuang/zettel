@@ -29,9 +29,10 @@ Static_Names :: struct {
 
 Function :: struct {
 	// Index into `Module.string_bytes`.
-	name:  Constant_String,
-	arity: int,
-	chunk: Chunk,
+	name:          Constant_String,
+	arity:         int,
+	upvalue_count: int,
+	chunk:         Chunk,
 }
 
 Chunk :: struct {
@@ -105,8 +106,16 @@ Op :: enum u8 {
 	Set_Local,
 	// The operand is a `Builtin`.
 	Get_Builtin,
+	// The operand indexes the current closure's upvalues.
+	Get_Upvalue,
+	Set_Upvalue,
 	// Functions
 	//
+	// Pushes a new closure of a function that captures variables. The operand is the index of
+	// the function's constant, followed by a `Capture` for each of its upvalues.
+	Closure,
+	// Moves the local on top of the stack into the upvalues that captured it, then pops it.
+	Close_Upvalue,
 	// Calls the value below its arguments, which are on top of the stack. The operand is the
 	// argument count.
 	Call,
@@ -131,6 +140,10 @@ op_operand_size := #partial [Op]int {
 	.Get_Local     = 2,
 	.Set_Local     = 2,
 	.Get_Builtin   = 1,
+	.Get_Upvalue   = 1,
+	.Set_Upvalue   = 1,
+	// Not including the captures.
+	.Closure       = 2,
 	.Call          = 1,
 }
 
@@ -138,6 +151,19 @@ MAX_CONSTANTS :: 1 << 16
 MAX_STATICS :: 1 << 16
 MAX_LOCALS :: 1 << 16
 MAX_PARAMETERS :: 255
+MAX_UPVALUES :: 256
+
+Capture :: struct {
+	// Whether `index` is a local of the enclosing function, rather than one of its upvalues.
+	is_local: bool,
+	index:    u16,
+}
+
+CAPTURE_SIZE :: 3
+
+read_capture :: proc(code: []u8, offset: int) -> Capture {
+	return {is_local = code[offset] != 0, index = read_u16(code, offset + 1)}
+}
 
 module_destroy :: proc(module: ^Module) {
 	chunk_destroy(&module.main)

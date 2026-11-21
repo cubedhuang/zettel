@@ -16,11 +16,3 @@ later := 1
     assigned_later = 2 // error: 'assigned_later' is used before its declaration
 }
 assigned_later := 1
-
-// functions can't capture locals yet
-{
-    captured := 1
-    fn f() {
-        return captured // error: 'captured' is a local of an enclosing function, and closures aren't supported yet
-    }
-}

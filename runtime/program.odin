@@ -20,11 +20,11 @@ chunk_destroy :: proc(chunk: ^Chunk) {
 	delete(chunk.constants)
 }
 
-// Returns the class body as a function to `run`. `source` and `module` can be destroyed afterwards,
+// Returns the class body as a closure to `run`. `source` and `module` can be destroyed afterwards,
 // because the `Vm` keeps a copy of `source` for runtime errors.
 //
 // Loading a path that was loaded (e.g., for the REPL) before reuses its class.
-load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Function {
+load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Closure {
 	append(&vm.sources, common.source_clone(source^))
 	source_index := len(vm.sources) - 1
 
@@ -46,6 +46,7 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Fun
 	for function, index in module.functions {
 		name := intern_clone(vm, common.function_name(module, function))
 		functions[index] = new_function(vm, class, name, function.arity)
+		functions[index].upvalue_count = function.upvalue_count
 	}
 	for function, index in module.functions {
 		functions[index].chunk = load_chunk(vm, source_index, module, functions, function.chunk)
@@ -53,7 +54,16 @@ load :: proc(vm: ^Vm, source: ^common.Source, module: common.Module) -> ^Obj_Fun
 
 	main := new_function(vm, class, nil, 0)
 	main.chunk = load_chunk(vm, source_index, module, functions, module.main)
-	return main
+	return new_closure(vm, main)
+}
+
+new_closure :: proc(vm: ^Vm, function: ^Obj_Function) -> ^Obj_Closure {
+	closure := new(Obj_Closure)
+	closure.tag = .Closure
+	closure.function = function
+	closure.upvalues = make([]^Obj_Upvalue, function.upvalue_count)
+	track(vm, closure)
+	return closure
 }
 
 new_function :: proc(
@@ -89,7 +99,13 @@ load_chunk :: proc(
 			value := intern_clone(vm, common.constant_string(module, c))
 			constants[index] = to_value(value)
 		case common.Constant_Function:
-			constants[index] = to_value(functions[c.index])
+			// See `common.Function.upvalue_count`.
+			function := functions[c.index]
+			if function.upvalue_count == 0 {
+				constants[index] = to_value(new_closure(vm, function))
+			} else {
+				constants[index] = to_value(function)
+			}
 		}
 	}
 	return {

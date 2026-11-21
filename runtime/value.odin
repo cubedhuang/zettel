@@ -71,18 +71,25 @@ write_obj :: proc(w: io.Writer, obj: ^Obj, quote_strings := true) {
 		io.write_string(w, (^Obj_Class)(obj).name.text)
 		io.write_byte(w, '>')
 	case .Function:
-		function := (^Obj_Function)(obj)
-		io.write_string(w, "<fn")
-		if function.name != nil {
-			io.write_byte(w, ' ')
-			io.write_string(w, function.name.text)
-		}
-		io.write_byte(w, '>')
+		write_function(w, (^Obj_Function)(obj))
+	case .Closure:
+		write_function(w, (^Obj_Closure)(obj).function)
+	case .Upvalue:
+		io.write_string(w, "<upvalue>")
 	case .Native:
 		io.write_string(w, "<fn ")
 		io.write_string(w, (^Obj_Native)(obj).name.text)
 		io.write_byte(w, '>')
 	}
+}
+
+write_function :: proc(w: io.Writer, function: ^Obj_Function) {
+	io.write_string(w, "<fn")
+	if function.name != nil {
+		io.write_byte(w, ' ')
+		io.write_string(w, function.name.text)
+	}
+	io.write_byte(w, '>')
 }
 
 Obj :: struct {
@@ -94,6 +101,8 @@ Obj_Tag :: enum u8 {
 	String,
 	Class,
 	Function,
+	Closure,
+	Upvalue,
 	Native,
 }
 
@@ -109,15 +118,36 @@ Obj_Class :: struct {
 	statics:   [dynamic]Value,
 }
 
+// A function's code. Programs only see `Obj_Closure`s.
 Obj_Function :: struct {
-	using obj: Obj,
+	using obj:     Obj,
 	// nil for a class body.
-	name:      ^Obj_String,
-	arity:     int,
-	chunk:     Chunk,
+	name:          ^Obj_String,
+	arity:         int,
+	upvalue_count: int,
+	chunk:         Chunk,
 	// The class whose statics the function uses.
-	class:     ^Obj_Class,
+	class:         ^Obj_Class,
 }
+
+Obj_Closure :: struct {
+	using obj: Obj,
+	function:  ^Obj_Function,
+	upvalues:  []^Obj_Upvalue,
+}
+
+// While the variable's scope is running, the upvalue is open and refers to
+// its stack slot. Afterwards, it's closed and holds the value itself.
+Obj_Upvalue :: struct {
+	using obj: Obj,
+	// Stack index while open, or `CLOSED`.
+	slot:      int,
+	closed:    Value,
+	// The next open upvalue, in `Vm.open_upvalues`.
+	next_open: ^Obj_Upvalue,
+}
+
+CLOSED :: -1
 
 Obj_Native :: struct {
 	using obj: Obj,
@@ -141,6 +171,12 @@ obj_free :: proc(obj: ^Obj) {
 		function := (^Obj_Function)(obj)
 		chunk_destroy(&function.chunk)
 		free(function)
+	case .Closure:
+		closure := (^Obj_Closure)(obj)
+		delete(closure.upvalues)
+		free(closure)
+	case .Upvalue:
+		free((^Obj_Upvalue)(obj))
 	case .Native:
 		free((^Obj_Native)(obj))
 	}

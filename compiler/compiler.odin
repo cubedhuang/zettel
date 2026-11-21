@@ -45,6 +45,8 @@ Chunk_Compiler :: struct {
 	constant_locations: map[common.Constant]int,
 	// Each local's index is its stack slot relative to the frame.
 	locals:             [dynamic]Local,
+	// Variables of enclosing chunks that this function captures.
+	upvalues:           [dynamic]common.Capture,
 	// Declarations in the class body make statics at depth 0 and locals afterwards.
 	depth:              int,
 	// Enclosing loops and labeled statements, innermost last.
@@ -54,17 +56,20 @@ Chunk_Compiler :: struct {
 }
 
 Local :: struct {
-	name:  string,
-	depth: int,
+	name:     string,
+	depth:    int,
+	// Whether a nested function captures it, so leaving its scope must close the upvalue.
+	captured: bool,
 }
 
 Variable :: struct {
 	kind: enum u8 {
 		Static,
 		Local,
+		Upvalue,
 		Builtin,
 	},
-	// static_slots, locals, or builtin index
+	// static_slots, locals, upvalues, or builtin index
 	slot: int,
 }
 
@@ -106,6 +111,8 @@ Compile_Error_Tag :: enum u8 {
 	Too_Many_Statics,
 	Too_Many_Locals,
 	// `node` is the identifier.
+	Too_Many_Upvalues,
+	// `node` is the identifier.
 	Undeclared,
 	// `node` is the identifier or `Fn_Decl`.
 	Redeclared,
@@ -125,8 +132,6 @@ Compile_Error_Tag :: enum u8 {
 	Label_Shadowed,
 	// `node` is the `return`.
 	Return_Outside_Function,
-	// `node` is the identifier.
-	Capture_Unsupported,
 	// `node` is the identifier.
 	Used_Before_Declaration,
 	// `node` is the identifier.
@@ -151,6 +156,8 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 		return fmt.tprintf("more than %v static variables", common.MAX_STATICS)
 	case .Too_Many_Locals:
 		return fmt.tprintf("more than %v local variables", common.MAX_LOCALS)
+	case .Too_Many_Upvalues:
+		return fmt.tprintf("a function captures more than %v variables", common.MAX_UPVALUES)
 	case .Undeclared:
 		return fmt.tprintf(
 			"'%v' is not declared",
@@ -192,11 +199,6 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 		)
 	case .Return_Outside_Function:
 		return "'return' outside of a function"
-	case .Capture_Unsupported:
-		return fmt.tprintf(
-			"'%v' is a local of an enclosing function, and closures aren't supported yet",
-			token_text(ast, ast.nodes[error.node].main_token),
-		)
 	case .Used_Before_Declaration:
 		return fmt.tprintf(
 			"'%v' is used before its declaration",
@@ -286,6 +288,7 @@ compile :: proc(
 finish_chunk :: proc(chunk: ^Chunk_Compiler) -> common.Chunk {
 	delete(chunk.constant_locations)
 	delete(chunk.locals)
+	delete(chunk.upvalues)
 	delete(chunk.targets)
 	delete(chunk.breaks)
 	return {code = chunk.code[:], spans = chunk.spans[:], constants = chunk.constants[:]}
@@ -379,6 +382,9 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 			emit_variable(c, .Get_Static, variable, span)
 		case .Local:
 			emit_variable(c, .Get_Local, variable, span)
+		case .Upvalue:
+			emit(c, .Get_Upvalue, span)
+			emit_byte(c, u8(variable.slot), span)
 		case .Builtin:
 			emit(c, .Get_Builtin, span)
 			emit_byte(c, u8(variable.slot), span)
@@ -461,16 +467,31 @@ compile_fn_decl :: proc(c: ^Compiler, index: Node_Index) {
 	c.chunk = chunk.enclosing
 
 	function_index := len(c.functions)
+	captures := chunk.upvalues[:]
+	defer delete(captures)
+	chunk.upvalues = {}
 	append(
 		&c.functions,
 		common.Function {
 			name = add_string_bytes(c, name),
 			arity = len(params),
+			upvalue_count = len(captures),
 			chunk = finish_chunk(&chunk),
 		},
 	)
 	// A local function's value lands in its slot.
-	emit_constant(c, common.Constant_Function{u32(function_index)}, index)
+	constant := common.Constant_Function{u32(function_index)}
+	if len(captures) == 0 {
+		emit_constant(c, constant, index)
+	} else {
+		span := node_span(c.ast, index)
+		emit(c, .Closure, span)
+		emit_u16(c, add_constant(c, constant, index), span)
+		for capture in captures {
+			emit_byte(c, u8(capture.is_local), span)
+			emit_u16(c, int(capture.index), span)
+		}
+	}
 	if is_static {
 		emit_variable(c, .Set_Static, {.Static, c.static_slots[name]}, name_span)
 	}
@@ -634,8 +655,7 @@ begin_scope :: proc(c: ^Compiler) {
 end_scope :: proc(c: ^Compiler, span: common.Span) {
 	c.chunk.depth -= 1
 	for len(c.chunk.locals) > 0 && c.chunk.locals[len(c.chunk.locals) - 1].depth > c.chunk.depth {
-		pop(&c.chunk.locals)
-		emit(c, .Pop, span)
+		emit_pop_local(c, pop(&c.chunk.locals), span)
 	}
 }
 
@@ -660,8 +680,16 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 	// The last value is on top of the stack.
 	#reverse for target in targets {
 		variable, _ := resolve(c, target)
-		op: common.Op = .Set_Static if variable.kind == .Static else .Set_Local
-		emit_variable(c, op, variable, node_span(c.ast, target))
+		span := node_span(c.ast, target)
+		#partial switch variable.kind {
+		case .Static:
+			emit_variable(c, .Set_Static, variable, span)
+		case .Local:
+			emit_variable(c, .Set_Local, variable, span)
+		case .Upvalue:
+			emit(c, .Set_Upvalue, span)
+			emit_byte(c, u8(variable.slot), span)
+		}
 	}
 }
 
@@ -706,7 +734,7 @@ declare_local :: proc(c: ^Compiler, name: string, node: Node_Index) {
 	}
 	if len(c.chunk.locals) >= common.MAX_LOCALS do fail(c, .Too_Many_Locals, node)
 	// append on failure to keep locals in sync with the stack
-	append(&c.chunk.locals, Local{name, c.chunk.depth})
+	append(&c.chunk.locals, Local{name = name, depth = c.chunk.depth})
 }
 
 // `node` is the declaration's source for errors.
@@ -734,13 +762,8 @@ resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok
 	#reverse for local, slot in c.chunk.locals {
 		if local.name == name do return {.Local, slot}, true
 	}
-	for chunk := c.chunk.enclosing; chunk != nil; chunk = chunk.enclosing {
-		for local in chunk.locals {
-			if local.name == name {
-				fail(c, .Capture_Unsupported, identifier)
-				return
-			}
-		}
+	if index, found := resolve_upvalue(c, c.chunk, name, identifier); found {
+		return {.Upvalue, index}, true
 	}
 	if slot, found := c.static_slots[name]; found {
 		if c.chunk.enclosing == nil && !c.static_visible[slot] {
@@ -756,15 +779,56 @@ resolve :: proc(c: ^Compiler, identifier: Node_Index) -> (variable: Variable, ok
 	return
 }
 
+// Finds `name` in the chunks enclosing `chunk` and returns its index in `chunk.upvalues`, capturing
+// it in every chunk in between.
+resolve_upvalue :: proc(
+	c: ^Compiler,
+	chunk: ^Chunk_Compiler,
+	name: string,
+	identifier: Node_Index,
+) -> (
+	index: int,
+	found: bool,
+) {
+	enclosing := chunk.enclosing
+	if enclosing == nil do return
+	#reverse for &local, slot in enclosing.locals {
+		if local.name == name {
+			local.captured = true
+			return add_upvalue(c, chunk, {is_local = true, index = u16(slot)}, identifier), true
+		}
+	}
+	outer := resolve_upvalue(c, enclosing, name, identifier) or_return
+	return add_upvalue(c, chunk, {is_local = false, index = u16(outer)}, identifier), true
+}
+
+add_upvalue :: proc(
+	c: ^Compiler,
+	chunk: ^Chunk_Compiler,
+	capture: common.Capture,
+	identifier: Node_Index,
+) -> int {
+	for existing, index in chunk.upvalues {
+		if existing == capture do return index
+	}
+	if len(chunk.upvalues) >= common.MAX_UPVALUES do fail(c, .Too_Many_Upvalues, identifier)
+	append(&chunk.upvalues, capture)
+	return len(chunk.upvalues) - 1
+}
+
 // Compilation continues after an error to find more
 //
 // Note: The module is discarded, so the code emitted afterwards doesn't need to make sense.
 fail :: proc(c: ^Compiler, tag: Compile_Error_Tag, node: Node_Index) {
 	#partial switch tag {
-	case .Too_Many_Constants, .Jump_Too_Large, .Too_Many_Statics, .Too_Many_Locals:
+	case .Too_Many_Constants,
+	     .Jump_Too_Large,
+	     .Too_Many_Statics,
+	     .Too_Many_Locals,
+	     .Too_Many_Upvalues:
 		if tag in c.reported_once do return
 		c.reported_once += {tag}
-	case .Undeclared, .Used_Before_Declaration, .Capture_Unsupported:
+	case .Undeclared, .Used_Before_Declaration:
 		key := Name_Error{tag, token_text(c.ast, c.ast.nodes[node].main_token)}
 		if key in c.reported_names do return
 		c.reported_names[key] = {}
@@ -795,8 +859,12 @@ emit_variable :: proc(c: ^Compiler, op: common.Op, variable: Variable, span: com
 emit_pops_above :: proc(c: ^Compiler, depth: int, span: common.Span) {
 	#reverse for local in c.chunk.locals {
 		if local.depth <= depth do break
-		emit(c, .Pop, span)
+		emit_pop_local(c, local, span)
 	}
+}
+
+emit_pop_local :: proc(c: ^Compiler, local: Local, span: common.Span) {
+	emit(c, .Close_Upvalue if local.captured else .Pop, span)
 }
 
 // Jumps back to `start`. `node` is the source of the jump.
@@ -827,20 +895,23 @@ patch_jump :: proc(c: ^Compiler, location: int, node: Node_Index) {
 
 // `node` is the source of the constant.
 emit_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index) {
-	index, ok := c.chunk.constant_locations[constant]
-	if !ok {
-		index = len(c.chunk.constants)
-		if index >= common.MAX_CONSTANTS {
-			fail(c, .Too_Many_Constants, node)
-			return
-		}
-		append(&c.chunk.constants, constant)
-		c.chunk.constant_locations[constant] = index
-	}
-
+	index := add_constant(c, constant, node)
 	span := node_span(c.ast, node)
 	emit(c, .Constant, span)
 	emit_u16(c, index, span)
+}
+
+// Returns the constant's index in the chunk. `node` is the source of the constant.
+add_constant :: proc(c: ^Compiler, constant: common.Constant, node: Node_Index) -> int {
+	if index, ok := c.chunk.constant_locations[constant]; ok do return index
+	index := len(c.chunk.constants)
+	if index >= common.MAX_CONSTANTS {
+		fail(c, .Too_Many_Constants, node)
+		return 0
+	}
+	append(&c.chunk.constants, constant)
+	c.chunk.constant_locations[constant] = index
+	return index
 }
 
 // `source` includes the quotes.

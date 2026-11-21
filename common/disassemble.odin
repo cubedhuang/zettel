@@ -22,24 +22,28 @@ disassemble_chunk :: proc(w: io.Writer, module: Module, chunk: Chunk) {
 	for offset < len(chunk.code) {
 		op := Op(chunk.code[offset])
 		fmt.wprintf(w, "% 4d %v", offset, op, flush = false)
+		size := 1 + op_operand_size[op]
 
 		#partial switch op {
 		case .Constant:
 			index := read_u16(chunk.code, offset + 1)
 			fmt.wprintf(w, " [%v] ", index, flush = false)
-			constant := chunk.constants[index]
-			switch c in constant {
-			case f64:
-				fmt.wprint(w, c, flush = false)
-			case Constant_String:
-				fmt.wprintf(w, "\"%s\"", constant_string(module, c), flush = false)
-			case Constant_Function:
+			disassemble_constant(w, module, chunk.constants[index])
+		case .Closure:
+			index := read_u16(chunk.code, offset + 1)
+			fmt.wprintf(w, " [%v] ", index, flush = false)
+			disassemble_constant(w, module, chunk.constants[index])
+			function := module.functions[chunk.constants[index].(Constant_Function).index]
+			for _ in 0 ..< function.upvalue_count {
+				capture := read_capture(chunk.code, offset + size)
 				fmt.wprintf(
 					w,
-					"<fn %s>",
-					function_name(module, module.functions[c.index]),
+					" %v[%v]",
+					"local" if capture.is_local else "upvalue",
+					capture.index,
 					flush = false,
 				)
+				size += CAPTURE_SIZE
 			}
 		case .Jump, .Jump_If_False, .Jump_If_True:
 			jump := read_u16(chunk.code, offset + 1)
@@ -52,6 +56,8 @@ disassemble_chunk :: proc(w: io.Writer, module: Module, chunk: Chunk) {
 			fmt.wprintf(w, " [%v] %v", slot, static_name(module.statics, int(slot)), flush = false)
 		case .Get_Local, .Set_Local:
 			fmt.wprintf(w, " [%v]", read_u16(chunk.code, offset + 1), flush = false)
+		case .Get_Upvalue, .Set_Upvalue:
+			fmt.wprintf(w, " [%v]", chunk.code[offset + 1], flush = false)
 		case .Get_Builtin:
 			fmt.wprintf(w, " %v", builtin_names[Builtin(chunk.code[offset + 1])], flush = false)
 		case .Call:
@@ -59,6 +65,17 @@ disassemble_chunk :: proc(w: io.Writer, module: Module, chunk: Chunk) {
 		}
 
 		io.write_byte(w, '\n')
-		offset += 1 + op_operand_size[op]
+		offset += size
+	}
+}
+
+disassemble_constant :: proc(w: io.Writer, module: Module, constant: Constant) {
+	switch c in constant {
+	case f64:
+		fmt.wprint(w, c, flush = false)
+	case Constant_String:
+		fmt.wprintf(w, "\"%s\"", constant_string(module, c), flush = false)
+	case Constant_Function:
+		fmt.wprintf(w, "<fn %s>", function_name(module, module.functions[c.index]), flush = false)
 	}
 }

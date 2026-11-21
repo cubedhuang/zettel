@@ -1,0 +1,124 @@
+// a closure keeps its captured variables after the function returns
+fn make_counter() {
+    count := 0
+    fn next() {
+        count = count + 1
+        return count
+    }
+    return next
+}
+counter := make_counter()
+echo counter() // expect: 1
+echo counter() // expect: 2
+echo counter   // expect: <fn next>
+
+// each call captures new variables
+other := make_counter()
+echo other()   // expect: 1
+echo counter() // expect: 3
+
+// closures share a captured variable
+get_shared := nil
+set_shared := nil
+fn make_shared() {
+    value := "before"
+    fn get() { return value }
+    fn set(v) { value = v }
+    get_shared = get
+    set_shared = set
+}
+make_shared()
+set_shared("after")
+echo get_shared() // expect: "after"
+
+// while the variable is in scope, the closure sees changes to it
+fn sees_changes() {
+    x := 1
+    fn get() { return x }
+    x = 2
+    return get()
+}
+echo sees_changes() // expect: 2
+
+// parameters can be captured
+fn adder(n) {
+    fn add(x) { return x + n }
+    return add
+}
+echo adder(10)(5) // expect: 15
+
+// a function captures through the functions between it and the variable
+fn outer() {
+    x := "outer"
+    fn middle() {
+        fn inner() { return x }
+        return inner
+    }
+    return middle()
+}
+echo outer()() // expect: "outer"
+
+// a local function can call itself
+fn local_recursion() {
+    fn fact(n) {
+        if n < 2 { return 1 }
+        return n * fact(n - 1)
+    }
+    return fact
+}
+echo local_recursion()(5) // expect: 120
+
+// each loop iteration captures its own variables
+first := nil
+second := nil
+{
+    i := 0
+    while i < 2 {
+        copy := i
+        fn get() { return copy }
+        if i == 0 { first = get } else { second = get }
+        i = i + 1
+    }
+}
+echo first()  // expect: 0
+echo second() // expect: 1
+
+// an initializer's variables are new in each iteration
+init_first := nil
+{
+    n := 0
+    while i := n; i < 2 {
+        fn get() { return i }
+        if i == 0 { init_first = get }
+        n = n + 1
+    }
+}
+echo init_first() // expect: 0
+
+// leaving a loop with break closes its captured variables
+broken := nil
+while true {
+    message := "kept"
+    fn get() { return message }
+    broken = get
+    break
+}
+echo broken() // expect: "kept"
+
+// class-body blocks can be captured
+block_get := nil
+{
+    local := "block"
+    fn get() { return local }
+    block_get = get
+}
+echo block_get() // expect: "block"
+
+// captured variables shadow statics
+shadowed := "static"
+fn shadows() {
+    shadowed := "local"
+    fn get() { return shadowed }
+    return get()
+}
+echo shadows() // expect: "local"

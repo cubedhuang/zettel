@@ -8,23 +8,24 @@ import "core:strings"
 MAX_FRAMES :: 1024
 
 Vm :: struct {
-	sources: [dynamic]common.Source,
-	out:     io.Writer,
-	stack:   [dynamic]Value,
-	frames:  [dynamic]Frame,
-	objects: ^Obj,
-	strings: map[string]^Obj_String,
+	sources:       [dynamic]common.Source,
+	out:           io.Writer,
+	stack:         [dynamic]Value,
+	frames:        [dynamic]Frame,
+	objects:       ^Obj,
+	strings:       map[string]^Obj_String,
 	// path --> root class. Keys are owned.
-	modules:  map[string]^Obj_Class,
-	builtins: [common.Builtin]Value,
+	modules:       map[string]^Obj_Class,
+	builtins:      [common.Builtin]Value,
+	open_upvalues: ^Obj_Upvalue,
 }
 
 Frame :: struct {
-	function: ^Obj_Function,
+	closure: ^Obj_Closure,
 	// Only up to date at calls.
-	ip:       int,
+	ip:      int,
 	// Stack index of the frame's first local. The callee is right below it.
-	base:     int,
+	base:    int,
 }
 
 vm_init :: proc(vm: ^Vm, out: io.Writer) {
@@ -66,10 +67,11 @@ Runtime_Error :: struct {
 }
 
 // Runs a class body from `load`.
-run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
-	append(&vm.frames, Frame{function = main, base = len(vm.stack)})
-	chunk := main.chunk
-	statics := main.class.statics[:]
+run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
+	append(&vm.frames, Frame{closure = main, base = len(vm.stack)})
+	chunk := main.function.chunk
+	statics := main.function.class.statics[:]
+	upvalues := main.upvalues
 	base := len(vm.stack)
 	ip := 0
 
@@ -187,6 +189,18 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 		case .Get_Builtin:
 			vm_push(vm, vm.builtins[common.Builtin(chunk.code[ip])])
 			ip += 1
+		case .Get_Upvalue:
+			upvalue := upvalues[chunk.code[ip]]
+			ip += 1
+			vm_push(vm, upvalue.closed if upvalue.slot == CLOSED else vm.stack[upvalue.slot])
+		case .Set_Upvalue:
+			upvalue := upvalues[chunk.code[ip]]
+			ip += 1
+			if upvalue.slot == CLOSED {
+				upvalue.closed = vm_pop(vm)
+			} else {
+				vm.stack[upvalue.slot] = vm_pop(vm)
+			}
 		case .Get_Local:
 			vm_push(vm, vm.stack[base + int(common.read_u16(chunk.code, ip))])
 			ip += 2
@@ -197,7 +211,7 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 			arg_count := int(chunk.code[ip])
 			ip += 1
 			callee, is_obj := as_obj(vm.stack[len(vm.stack) - arg_count - 1])
-			if !is_obj || (callee.tag != .Function && callee.tag != .Native) {
+			if !is_obj || (callee.tag != .Closure && callee.tag != .Native) {
 				return runtime_error(vm, chunk, start, "can only call functions")
 			}
 			if callee.tag == .Native {
@@ -213,7 +227,8 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 				break
 			}
 
-			function := (^Obj_Function)(callee)
+			closure := (^Obj_Closure)(callee)
+			function := closure.function
 			if arg_count != function.arity {
 				return runtime_error(vm, chunk, start, arity_message(function.arity, arg_count))
 			}
@@ -223,13 +238,32 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 
 			vm.frames[len(vm.frames) - 1].ip = ip
 			base = len(vm.stack) - arg_count
-			append(&vm.frames, Frame{function = function, base = base})
+			append(&vm.frames, Frame{closure = closure, base = base})
 			chunk = function.chunk
 			statics = function.class.statics[:]
+			upvalues = closure.upvalues
 			ip = 0
+		case .Closure:
+			function := (^Obj_Function)(to_obj(chunk.constants[common.read_u16(chunk.code, ip)]))
+			ip += 2
+			closure := new_closure(vm, function)
+			for &upvalue in closure.upvalues {
+				capture := common.read_capture(chunk.code, ip)
+				ip += common.CAPTURE_SIZE
+				if capture.is_local {
+					upvalue = capture_upvalue(vm, base + int(capture.index))
+				} else {
+					upvalue = upvalues[capture.index]
+				}
+			}
+			vm_push(vm, to_value(closure))
+		case .Close_Upvalue:
+			close_upvalues(vm, len(vm.stack) - 1)
+			vm_pop(vm)
 		case .Return:
 			result := vm_pop(vm)
 			finished := pop(&vm.frames)
+			close_upvalues(vm, finished.base)
 			if len(vm.frames) == 0 {
 				resize(&vm.stack, finished.base)
 				return {}, true
@@ -238,8 +272,9 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 			vm_push(vm, result)
 
 			frame := vm.frames[len(vm.frames) - 1]
-			chunk = frame.function.chunk
-			statics = frame.function.class.statics[:]
+			chunk = frame.closure.function.chunk
+			statics = frame.closure.function.class.statics[:]
+			upvalues = frame.closure.upvalues
 			base = frame.base
 			ip = frame.ip
 		case .Pop:
@@ -258,10 +293,51 @@ run :: proc(vm: ^Vm, main: ^Obj_Function) -> (error: Runtime_Error, ok: bool) {
 
 // Uses `context.temp_allocator`.
 arity_message :: proc(expected, got: int) -> string {
-	return fmt.tprintf("expected %v argument%v, got %v", expected, "" if expected == 1 else "s", got)
+	return fmt.tprintf(
+		"expected %v argument%v, got %v",
+		expected,
+		"" if expected == 1 else "s",
+		got,
+	)
+}
+
+// Returns the open upvalue for the stack slot or creates if needed.
+capture_upvalue :: proc(vm: ^Vm, slot: int) -> ^Obj_Upvalue {
+	previous: ^Obj_Upvalue
+	current := vm.open_upvalues
+	for current != nil && current.slot > slot {
+		previous = current
+		current = current.next_open
+	}
+	if current != nil && current.slot == slot do return current
+
+	upvalue := new(Obj_Upvalue)
+	upvalue.tag = .Upvalue
+	upvalue.slot = slot
+	upvalue.next_open = current
+	track(vm, upvalue)
+	if previous == nil {
+		vm.open_upvalues = upvalue
+	} else {
+		previous.next_open = upvalue
+	}
+	return upvalue
+}
+
+// Closes the open upvalues for stack slots from `first` up.
+close_upvalues :: proc(vm: ^Vm, first: int) {
+	for vm.open_upvalues != nil && vm.open_upvalues.slot >= first {
+		upvalue := vm.open_upvalues
+		upvalue.closed = vm.stack[upvalue.slot]
+		upvalue.slot = CLOSED
+		vm.open_upvalues = upvalue.next_open
+		upvalue.next_open = nil
+	}
 }
 
 runtime_error :: proc(vm: ^Vm, chunk: Chunk, ip: int, message: string) -> (Runtime_Error, bool) {
+	// closures might still survive like in the REPL
+	close_upvalues(vm, 0)
 	clear(&vm.stack)
 	clear(&vm.frames)
 	return {message = message, span = chunk.spans[ip], source = chunk.source}, false

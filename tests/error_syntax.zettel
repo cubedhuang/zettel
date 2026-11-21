@@ -43,6 +43,10 @@ bad_rest := (..rest, last) => 1 // error: a rest parameter must be the last para
 split := (x)
     => x // error: '=>' must be on the same line as the lambda's parameters
 
+// a conditional needs an 'else' on the same line, and its condition can't be a conditional
+no_else := 1 if true          // error: expected 'else', got a newline
+nested := 1 if 2 if 3 else 4 else 5 // error: a conditional's condition can't be another conditional; use parentheses
+
 // a constructor needs a parameter for the new instance
 constructor no_self() {}     // error: a constructor needs a first parameter for the new instance, like 'self'
 constructor rest_self(..r) {} // error: a constructor needs a first parameter for the new instance, like 'self'

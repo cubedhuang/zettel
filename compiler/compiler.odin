@@ -827,6 +827,17 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 		compile_expression(c, node.data.token_and_node.node)
 	case .Lambda:
 		compile_function(c, index, .Function, "")
+	case .Conditional:
+		values := extra_data(c.ast, node.data.node_and_extra.extra, Conditional)
+		compile_expression(c, node.data.node_and_extra.node)
+		to_else := emit_jump(c, .Jump_If_False, span)
+		emit(c, .Pop, span)
+		compile_expression(c, values.then_value)
+		to_end := emit_jump(c, .Jump, span)
+		patch_jump(c, to_else, index)
+		emit(c, .Pop, span)
+		compile_expression(c, values.else_value)
+		patch_jump(c, to_end, index)
 	case .Negate:
 		compile_expression(c, node.data.node)
 		emit(c, .Negate, span)

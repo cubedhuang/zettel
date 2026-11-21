@@ -1,0 +1,37 @@
+fn collatz(x) {
+    return x / 2 if x % 2 == 0 else 3 * x + 1
+}
+echo collatz(6) // expect: 3
+echo collatz(7) // expect: 22
+
+// the conditional has the lowest precedence
+echo 1 + 2 if false else 10 // expect: 10
+echo 1 if true or false else 2 // expect: 1
+
+// it's right-associative
+sign := (n) => "negative" if n < 0 else "zero" if n == 0 else "positive"
+echo sign(-5) // expect: "negative"
+echo sign(0)  // expect: "zero"
+echo sign(5)  // expect: "positive"
+
+// only the chosen value is evaluated
+fn loud(value) {
+    print("evaluated", value)
+    return value
+}
+echo loud(1) if true else loud(2)
+// expect: evaluated 1
+// expect: 1
+
+// it works in initializers and spans lines inside parentheses
+if n := 4 if true else 5; n > 3 {
+    echo n // expect: 4
+}
+long := (
+    "yes"
+    if 1 < 2
+    else "no"
+)
+echo long // expect: "yes"
+// a conditional condition needs parentheses
+echo "a" if ("b" if false else nil) else "c" // expect: "c"

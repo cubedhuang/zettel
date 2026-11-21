@@ -208,6 +208,13 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `[`.
 	Index,
+	// `then_value if node else else_value`.
+	//
+	// The `data` field is `node_and_extra`. The node is the condition and the extra points at a
+	// `Conditional`.
+	//
+	// The `main_token` field is the `if`.
+	Conditional,
 	// `node.name`.
 	//
 	// The `data` field is `node`, the object.
@@ -288,6 +295,11 @@ Multi_Assign :: struct {
 	rhs: Node_Range,
 }
 
+Conditional :: struct {
+	then_value: Node_Index,
+	else_value: Node_Index,
+}
+
 If_While :: struct {
 	// Optional simple statement.
 	init:        Node_Index,
@@ -332,6 +344,7 @@ Parse_Error_Tag :: enum u8 {
 	List_Parens_Not_Lambda,
 	Spread_Parens_Not_Lambda,
 	Arrow_On_New_Line,
+	Conditional_In_Condition,
 	Constructor_Without_Self,
 	Too_Many_Return_Values,
 	Compound_Assign_Multi,
@@ -603,6 +616,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			index = node.data.node_and_extra.node
 		case .Property:
 			index = node.data.node
+		case .Conditional:
+			index = extra_data(ast, node.data.node_and_extra.extra, Conditional).then_value
 		}
 	}
 }
@@ -636,6 +651,8 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			index = node.data.node_and_extra.node
 		case .Class_Decl:
 			index = node.data.node
+		case .Conditional:
+			index = extra_data(ast, node.data.node_and_extra.extra, Conditional).else_value
 		case .Return:
 			if node.data.node == 0 do return node.main_token
 			index = node.data.node
@@ -761,6 +778,8 @@ parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 			"'..' in parentheses can only make a lambda's rest parameter; expected '=>', got %v",
 			found,
 		)
+	case .Conditional_In_Condition:
+		return "a conditional's condition can't be another conditional; use parentheses"
 	case .Arrow_On_New_Line:
 		return "'=>' must be on the same line as the lambda's parameters"
 	case .Constructor_Without_Self:

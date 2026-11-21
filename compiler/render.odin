@@ -106,6 +106,15 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 		io.write_byte(w, ' ')
 		render_node(w, ast, node.data.node_and_node.rhs, indent)
 		io.write_byte(w, ')')
+	case .Conditional:
+		values := extra_data(ast, node.data.node_and_extra.extra, Conditional)
+		io.write_string(w, "(if ")
+		render_node(w, ast, node.data.node_and_extra.node, indent)
+		io.write_byte(w, ' ')
+		render_node(w, ast, values.then_value, indent)
+		io.write_byte(w, ' ')
+		render_node(w, ast, values.else_value, indent)
+		io.write_byte(w, ')')
 	case .Property:
 		io.write_string(w, "(. ")
 		render_node(w, ast, node.data.node, indent)

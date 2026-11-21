@@ -501,9 +501,34 @@ exprs_to_range :: proc(p: ^Parser, exprs: Exprs) -> Node_Range {
 	unreachable()
 }
 
-// Expr <- Expr (BinaryOp Expr)?
-//       / Unary
-parse_expression :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, ok: bool) {
+// Expr <- Binary (KEYWORD_IF Binary KEYWORD_ELSE Expr)?
+parse_expression :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
+	node = parse_binary(p) or_return
+	if peek_tag(p) != .Keyword_If do return node, true
+
+	if_token := advance(p)
+	condition := parse_binary(p) or_return
+	if peek_tag(p) == .Keyword_If {
+		add_error(p, {tag = .Conditional_In_Condition})
+		return
+	}
+	expect(p, .Keyword_Else) or_return
+	else_value := parse_expression(p) or_return
+	extra := add_extra(p, Conditional{node, else_value})
+	return add_node(
+			p,
+			{
+				tag = .Conditional,
+				main_token = if_token,
+				data = {node_and_extra = {condition, extra}},
+			},
+		),
+		true
+}
+
+// Binary <- Binary (BinaryOp Binary)?
+//         / Unary
+parse_binary :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, ok: bool) {
 	node = parse_unary(p) or_return
 
 	for {
@@ -512,7 +537,7 @@ parse_expression :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, 
 
 		operator := advance(p)
 		// `^` is right-associative, so its right side can hold another `^`
-		rhs := parse_expression(p, precedence - 1 if tag == .Pow else precedence) or_return
+		rhs := parse_binary(p, precedence - 1 if tag == .Pow else precedence) or_return
 		check_operands(p, tag, operator, node, rhs) or_return
 		node = add_node(
 			p,
@@ -523,8 +548,9 @@ parse_expression :: proc(p: ^Parser, min_precedence := 0) -> (node: Node_Index, 
 	return node, true
 }
 
-// PRECEDENCE (like Odin's):
+// PRECEDENCE:
 //
+// Conditional     a if b else c     (right-associative, handled by `parse_expression`)
 // Or              or
 // And             and
 // Comparison      == != < <= > >=   (can't be chained)

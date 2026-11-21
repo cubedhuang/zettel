@@ -109,12 +109,17 @@ is_falsy :: proc(value: Value) -> bool {
 	return value == NIL || value == FALSE
 }
 
-write_value :: proc(w: io.Writer, value: Value, quote_strings := true) {
+write_value :: proc(
+	w: io.Writer,
+	value: Value,
+	quote_strings := true,
+	writing: ^Writing_Array = nil,
+) {
 	switch {
 	case is_number(value):
 		write_number(w, to_number(value))
 	case is_obj(value):
-		write_obj(w, to_obj(value), quote_strings)
+		write_obj(w, to_obj(value), quote_strings, writing)
 	case value == NIL:
 		io.write_string(w, "nil")
 	case value == TRUE:

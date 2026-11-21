@@ -136,6 +136,7 @@ parse_stmt :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	     .Keyword_True,
 	     .Keyword_False,
 	     .Paren_Open,
+	     .Bracket_Open,
 	     .Minus,
 	     .Bang,
 	     .Keyword_Echo:
@@ -498,15 +499,32 @@ parse_unary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	return add_node(p, {tag = tag, main_token = operator, data = {node = operand}}), true
 }
 
-// Postfix <- Primary Call*
+// Postfix <- Primary (Call / Index)*
 //
-// Call <- PAREN_OPEN (Expr (COMMA Expr)* COMMA?)? PAREN_CLOSE
+// Call <- PAREN_OPEN ExprList PAREN_CLOSE
+//
+// Index <- BRACKET_OPEN Expr BRACKET_CLOSE
 parse_postfix :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	node = parse_primary(p) or_return
-	for peek_tag(p) == .Paren_Open {
-		node = parse_call(p, node) or_return
+	for {
+		#partial switch peek_tag(p) {
+		case .Paren_Open:
+			node = parse_call(p, node) or_return
+		case .Bracket_Open:
+			open := advance(p)
+			p.depth += 1
+			index, index_ok := parse_expression(p)
+			p.depth -= 1
+			if !index_ok do return
+			expect(p, .Bracket_Close) or_return
+			node = add_node(
+				p,
+				{tag = .Index, main_token = open, data = {node_and_node = {node, index}}},
+			)
+		case:
+			return node, true
+		}
 	}
-	return node, true
 }
 
 parse_call :: proc(p: ^Parser, callee: Node_Index) -> (node: Node_Index, ok: bool) {
@@ -515,18 +533,7 @@ parse_call :: proc(p: ^Parser, callee: Node_Index) -> (node: Node_Index, ok: boo
 	scratch_top := len(p.scratch)
 	defer non_zero_resize(&p.scratch, scratch_top)
 
-	p.depth += 1
-	for peek_tag(p) != .Paren_Close {
-		arg, arg_ok := parse_expression(p)
-		if !arg_ok {
-			p.depth -= 1
-			return
-		}
-		append(&p.scratch, arg)
-		if peek_tag(p) != .Comma do break
-		advance(p)
-	}
-	p.depth -= 1
+	parse_expr_list(p, .Paren_Close) or_return
 	args := p.scratch[scratch_top:]
 	if len(args) > common.MAX_PARAMETERS {
 		add_error(p, {tag = .Too_Many_Arguments})
@@ -550,6 +557,20 @@ parse_call :: proc(p: ^Parser, callee: Node_Index) -> (node: Node_Index, ok: boo
 		true
 }
 
+// ExprList <- (Expr (COMMA Expr)* COMMA?)?
+//
+// Appends the expressions to `p.scratch`. Newlines are skipped until `close`, which isn't consumed.
+parse_expr_list :: proc(p: ^Parser, close: Token_Tag) -> (ok: bool) {
+	p.depth += 1
+	defer p.depth -= 1
+	for peek_tag(p) != close {
+		append(&p.scratch, parse_expression(p) or_return)
+		if peek_tag(p) != .Comma do break
+		advance(p)
+	}
+	return true
+}
+
 // Primary <- NUMBER
 //          / STRING
 //          / KEYWORD_NIL
@@ -557,8 +578,26 @@ parse_call :: proc(p: ^Parser, callee: Node_Index) -> (node: Node_Index, ok: boo
 //          / KEYWORD_FALSE
 //          / IDENTIFIER
 //          / PAREN_OPEN Expr PAREN_CLOSE
+//          / BRACKET_OPEN ExprList BRACKET_CLOSE
 parse_primary :: proc(p: ^Parser) -> (node: Node_Index, ok: bool) {
 	#partial switch peek_tag(p) {
+	case .Bracket_Open:
+		open := advance(p)
+		scratch_top := len(p.scratch)
+		defer non_zero_resize(&p.scratch, scratch_top)
+		parse_expr_list(p, .Bracket_Close) or_return
+		elements := p.scratch[scratch_top:]
+		if len(elements) > common.MAX_ELEMENTS {
+			add_error(p, {tag = .Too_Many_Elements})
+			return
+		}
+		expect(p, .Bracket_Close) or_return
+		range := make_range(p, elements)
+		return add_node(
+				p,
+				{tag = .Array_Literal, main_token = open, data = {extra_range = range}},
+			),
+			true
 	case .Number:
 		return add_node(p, {tag = .Number_Literal, main_token = advance(p)}), true
 	case .String:

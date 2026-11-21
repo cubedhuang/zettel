@@ -157,6 +157,18 @@ Node_Tag :: enum u8 {
 	//
 	// The `main_token` field is the `(`.
 	Call,
+	// `[a, b, ...]`.
+	//
+	// The `data` field is `extra_range` of elements.
+	//
+	// The `main_token` field is the `[`.
+	Array_Literal,
+	// `lhs[rhs]`.
+	//
+	// The `data` field is `node_and_node`. `lhs` is the indexed value and `rhs` is the index.
+	//
+	// The `main_token` field is the `[`.
+	Index,
 	// `lhs + rhs`.
 	//
 	// For all binary operations, the `data` field is `node_and_node` with both operands.
@@ -246,6 +258,7 @@ Parse_Error_Tag :: enum u8 {
 	Invalid_Label_Target,
 	Too_Many_Parameters,
 	Too_Many_Arguments,
+	Too_Many_Elements,
 	Else_On_New_Line,
 }
 
@@ -315,6 +328,11 @@ call_parts :: proc(ast: Ast, index: Node_Index) -> (callee: Node_Index, args: []
 		return node.data.node_and_extra.node, extra_data_slice(ast, range, Node_Index)
 	}
 	panic("tag of call_parts node must be a call")
+}
+
+array_elements :: proc(ast: Ast, index: Node_Index) -> []Node_Index {
+	assert(ast.nodes[index].tag == .Array_Literal, "tag of array_elements node must be Array_Literal")
+	return extra_data_slice(ast, ast.nodes[index].data.extra_range, Node_Index)
 }
 
 // For `If_Simple`, `If`, `While_Simple`, and `While`. `init` and `else_branch` are 0 when missing.
@@ -422,7 +440,8 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 		     .Grouped,
 		     .Negate,
 		     .Not,
-		     .Echo:
+		     .Echo,
+		     .Array_Literal:
 			return node.main_token
 		case .Assign,
 		     .Decl,
@@ -441,7 +460,7 @@ first_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			index = node.data.node_and_node.lhs
 		case .Assign_Multi, .Decl_Multi:
 			index = assign_targets(ast, index)[0]
-		case .Call_One:
+		case .Call_One, .Index:
 			index = node.data.node_and_node.lhs
 		case .Call:
 			index = node.data.node_and_extra.node
@@ -484,11 +503,15 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 			if _, args := call_parts(ast, index); len(args) > 0 {
 				token = last_token(ast, args[len(args) - 1])
 			}
-			token += 1
-			for ast.tokens[token].tag == .Newline || ast.tokens[token].tag == .Comma {
-				token += 1
+			return skip_to_close(ast, token + 1)
+		case .Array_Literal:
+			token := node.main_token
+			if elements := array_elements(ast, index); len(elements) > 0 {
+				token = last_token(ast, elements[len(elements) - 1])
 			}
-			return token
+			return skip_to_close(ast, token + 1)
+		case .Index:
+			return skip_to_close(ast, last_token(ast, node.data.node_and_node.rhs) + 1)
 		case .Number_Literal,
 		     .String_Literal,
 		     .Nil_Literal,
@@ -522,6 +545,13 @@ last_token :: proc(ast: Ast, index: Node_Index) -> Token_Index {
 	}
 }
 
+// Skips the newlines and trailing comma that can come before a closing `)` or `]`.
+skip_to_close :: proc(ast: Ast, token: Token_Index) -> Token_Index {
+	token := token
+	for ast.tokens[token].tag == .Newline || ast.tokens[token].tag == .Comma do token += 1
+	return token
+}
+
 // Uses `context.temp_allocator`.
 parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 	found := token_names[ast.tokens[error.token].tag]
@@ -546,6 +576,8 @@ parse_error_message :: proc(ast: Ast, error: Parse_Error) -> string {
 		return fmt.tprintf("more than %v parameters", common.MAX_PARAMETERS)
 	case .Too_Many_Arguments:
 		return fmt.tprintf("more than %v arguments", common.MAX_PARAMETERS)
+	case .Too_Many_Elements:
+		return fmt.tprintf("more than %v elements", common.MAX_ELEMENTS)
 	case .Else_On_New_Line:
 		return "'else' must be on the same line as the '}' before it"
 	}

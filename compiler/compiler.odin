@@ -293,7 +293,9 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 	targets := assign_targets(c.ast, index)
 	valid := true
 	for target in targets {
-		if c.ast.nodes[target].tag != .Identifier {
+		if c.ast.nodes[target].tag == .Index {
+			continue
+		} else if c.ast.nodes[target].tag != .Identifier {
 			fail(c, .Invalid_Assignment_Target, target)
 			valid = false
 		} else if variable, ok := resolve(c, target); !ok {
@@ -307,10 +309,17 @@ compile_assign :: proc(c: ^Compiler, index: Node_Index) {
 	compile_values(c, index)
 	if !valid do return
 
-	// The last value is on top of the stack.
+	// The last value is on top of the stack, so targets are assigned from right to left. An index
+	// target's operands are evaluated just before it's assigned.
 	#reverse for target in targets {
-		variable, _ := resolve(c, target)
 		span := node_span(c.ast, target)
+		if c.ast.nodes[target].tag == .Index {
+			compile_expression(c, c.ast.nodes[target].data.node_and_node.lhs)
+			compile_expression(c, c.ast.nodes[target].data.node_and_node.rhs)
+			emit(c, .Set_Index, span)
+			continue
+		}
+		variable, _ := resolve(c, target)
 		#partial switch variable.kind {
 		case .Static:
 			emit_variable(c, .Set_Static, variable, span)
@@ -575,6 +584,15 @@ compile_expression :: proc(c: ^Compiler, index: Node_Index) {
 	case .Echo:
 		compile_expression(c, node.data.node)
 		emit(c, .Echo, span)
+	case .Array_Literal:
+		elements := array_elements(c.ast, index)
+		for element in elements do compile_expression(c, element)
+		emit(c, .Array, span)
+		emit_u16(c, len(elements), span)
+	case .Index:
+		compile_expression(c, node.data.node_and_node.lhs)
+		compile_expression(c, node.data.node_and_node.rhs)
+		emit(c, .Get_Index, span)
 	case .Call_One, .Call:
 		callee, args := call_parts(c.ast, index)
 		compile_expression(c, callee)
@@ -896,7 +914,7 @@ compile_error_message :: proc(ast: Ast, error: Compile_Error) -> string {
 			declared_name(ast, error.node),
 		)
 	case .Invalid_Assignment_Target:
-		return "can only assign to variables"
+		return "can only assign to variables and elements"
 	case .Too_Few_Values:
 		return "fewer values than targets"
 	case .Outside_Loop:

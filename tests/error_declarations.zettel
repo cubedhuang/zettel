@@ -15,5 +15,5 @@ fn y() {}
 y := 1 // error: 'y' is already declared in this scope
 
 p, q := 1 // error: fewer values than targets
-1 = 2 // error: can only assign to variables
+1 = 2 // error: can only assign to variables and elements
 print = 1 // error: can't assign to builtin 'print'

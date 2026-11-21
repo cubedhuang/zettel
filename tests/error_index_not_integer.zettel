@@ -1,0 +1,2 @@
+xs := [1, 2]
+echo xs[1 / 2] // error: index must be an integer

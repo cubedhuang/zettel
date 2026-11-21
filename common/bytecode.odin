@@ -10,6 +10,8 @@ Op :: enum u8 {
 	Nil,
 	True,
 	False,
+	// Pops the operand's number of values and pushes an array of them, in order.
+	Array,
 	// Unary
 	//
 	// Pops one value from the stack.
@@ -50,6 +52,11 @@ Op :: enum u8 {
 	// The operand indexes the current closure's upvalues.
 	Get_Upvalue,
 	Set_Upvalue,
+	// Pops the index, then the indexed value, and pushes the element.
+	Get_Index,
+	// Pops the index, then the indexed value, then the new element. The element is below the
+	// others so that assignments can evaluate all their values first.
+	Set_Index,
 	// Functions
 	//
 	// Pushes a new closure of a function that captures variables. The operand is the index of
@@ -72,6 +79,7 @@ Op :: enum u8 {
 
 op_operand_size := #partial [Op]int {
 	.Constant      = 2,
+	.Array         = 2,
 	.Jump          = 2,
 	.Jump_If_False = 2,
 	.Jump_If_True  = 2,
@@ -98,10 +106,16 @@ CAPTURE_SIZE :: 3
 
 Builtin :: enum u8 {
 	Print,
+	Len,
+	Push,
+	Pop,
 }
 
 builtin_names := [Builtin]string {
 	.Print = "print",
+	.Len   = "len",
+	.Push  = "push",
+	.Pop   = "pop",
 }
 
 MAX_CONSTANTS :: 1 << 16
@@ -109,6 +123,7 @@ MAX_STATICS :: 1 << 16
 MAX_LOCALS :: 1 << 16
 MAX_PARAMETERS :: 255
 MAX_UPVALUES :: 256
+MAX_ELEMENTS :: int(max(u16))
 
 read_u16 :: proc(code: []u8, offset: int) -> u16 {
 	return u16(code[offset]) | u16(code[offset + 1]) << 8

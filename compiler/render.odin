@@ -86,6 +86,19 @@ render_node :: proc(w: io.Writer, ast: Ast, index: Node_Index, indent := 0) {
 			render_node(w, ast, arg, indent)
 		}
 		io.write_byte(w, ')')
+	case .Array_Literal:
+		io.write_string(w, "(array")
+		for element in array_elements(ast, index) {
+			io.write_byte(w, ' ')
+			render_node(w, ast, element, indent)
+		}
+		io.write_byte(w, ')')
+	case .Index:
+		io.write_string(w, "(index ")
+		render_node(w, ast, node.data.node_and_node.lhs, indent)
+		io.write_byte(w, ' ')
+		render_node(w, ast, node.data.node_and_node.rhs, indent)
+		io.write_byte(w, ')')
 	case .Number_Literal:
 		io.write_string(w, token_text(ast, node.main_token))
 	case .String_Literal:

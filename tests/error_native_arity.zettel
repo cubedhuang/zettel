@@ -1,0 +1,1 @@
+len([], []) // error: expected 1 argument, got 2

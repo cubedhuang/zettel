@@ -1,0 +1,2 @@
+xs := [1, 2]
+echo xs[2] // error: index 2 is out of bounds for length 2

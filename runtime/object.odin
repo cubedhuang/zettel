@@ -15,6 +15,7 @@ Obj_Tag :: enum u8 {
 	Closure,
 	Upvalue,
 	Native,
+	Array,
 }
 
 Obj_String :: struct {
@@ -60,6 +61,11 @@ Obj_Upvalue :: struct {
 
 CLOSED :: -1
 
+Obj_Array :: struct {
+	using obj: Obj,
+	items:     [dynamic]Value,
+}
+
 Obj_Native :: struct {
 	using obj: Obj,
 	name:      ^Obj_String,
@@ -83,6 +89,8 @@ new_obj :: proc(vm: ^Vm, $T: typeid) -> ^T {
 		obj.tag = .Upvalue
 	} else when T == Obj_Native {
 		obj.tag = .Native
+	} else when T == Obj_Array {
+		obj.tag = .Array
 	} else {
 		#panic("not an object type")
 	}
@@ -127,6 +135,13 @@ new_native :: proc(vm: ^Vm, name: ^Obj_String, native: Native) -> ^Obj_Native {
 	return obj
 }
 
+// Takes ownership of `items`.
+new_array :: proc(vm: ^Vm, items: [dynamic]Value) -> ^Obj_Array {
+	array := new_obj(vm, Obj_Array)
+	array.items = items
+	return array
+}
+
 intern_clone :: proc(vm: ^Vm, text: string) -> ^Obj_String {
 	if s, ok := vm.strings[text]; ok {
 		return s
@@ -169,10 +184,20 @@ obj_free :: proc(obj: ^Obj) {
 		free((^Obj_Upvalue)(obj))
 	case .Native:
 		free((^Obj_Native)(obj))
+	case .Array:
+		array := (^Obj_Array)(obj)
+		delete(array.items)
+		free(array)
 	}
 }
 
-write_obj :: proc(w: io.Writer, obj: ^Obj, quote_strings := true) {
+// The arrays being written, innermost first, so an array that contains itself is written as `[...]`.
+Writing_Array :: struct {
+	array: ^Obj_Array,
+	outer: ^Writing_Array,
+}
+
+write_obj :: proc(w: io.Writer, obj: ^Obj, quote_strings := true, writing: ^Writing_Array = nil) {
 	switch obj.tag {
 	case .String:
 		s := (^Obj_String)(obj)
@@ -193,6 +218,22 @@ write_obj :: proc(w: io.Writer, obj: ^Obj, quote_strings := true) {
 		io.write_string(w, "<fn ")
 		io.write_string(w, (^Obj_Native)(obj).name.text)
 		io.write_byte(w, '>')
+	case .Array:
+		array := (^Obj_Array)(obj)
+		for outer := writing; outer != nil; outer = outer.outer {
+			if outer.array == array {
+				io.write_string(w, "[...]")
+				return
+			}
+		}
+		inner := Writing_Array{array, writing}
+		io.write_byte(w, '[')
+		for item, i in array.items {
+			if i > 0 do io.write_string(w, ", ")
+			// elements are always quoted so `["a, b"]` and `["a", "b"]` look different
+			write_value(w, item, true, &inner)
+		}
+		io.write_byte(w, ']')
 	}
 }
 

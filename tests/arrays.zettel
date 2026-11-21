@@ -1,0 +1,64 @@
+// array literals hold any values
+echo []                   // expect: []
+echo [1, "a", nil, [true]] // expect: [1, "a", nil, [true]]
+
+// literals can span lines with a trailing comma
+multiline := [
+    1,
+    2,
+]
+echo multiline // expect: [1, 2]
+
+// indexing starts at 0
+xs := [10, 20, 30]
+echo xs[0]          // expect: 10
+echo xs[2]          // expect: 30
+echo xs[1 + 1]      // expect: 30
+echo [[1, 2], [3]][0][1] // expect: 2
+
+// elements can be assigned
+xs[1] = 21
+echo xs // expect: [10, 21, 30]
+
+// multiple assignment evaluates every value first
+xs[0], xs[2] = xs[2], xs[0]
+echo xs // expect: [30, 21, 10]
+
+// arrays are shared, not copied
+ys := xs
+ys[0] = "shared"
+echo xs[0]    // expect: "shared"
+echo xs == ys // expect: true
+echo [1] == [1] // expect: false
+
+// len, push, and pop
+zs := []
+push(zs, 1)
+push(zs, 2)
+echo len(zs) // expect: 2
+echo pop(zs) // expect: 2
+echo zs      // expect: [1]
+echo len("hello") // expect: 5
+
+// print quotes strings inside arrays
+print(["a, b", "c"]) // expect: ["a, b", "c"]
+
+// an array inside itself is written as [...]
+loop := [1]
+push(loop, loop)
+echo loop // expect: [1, [...]]
+
+// functions can index captured and returned arrays
+fn make_stack() {
+    items := []
+    fn push_twice(x) {
+        push(items, x)
+        push(items, x)
+        return items
+    }
+    return push_twice
+}
+echo make_stack()("x") // expect: ["x", "x"]
+
+// an empty array is truthy
+if [] { echo "truthy" } // expect: "truthy"

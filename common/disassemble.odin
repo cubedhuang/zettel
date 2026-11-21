@@ -54,6 +54,8 @@ disassemble_chunk :: proc(w: io.Writer, module: Module, chunk: Chunk) {
 		case .Get_Static, .Set_Static:
 			slot := read_u16(chunk.code, offset + 1)
 			fmt.wprintf(w, " [%v] %v", slot, static_name(module.statics, int(slot)), flush = false)
+		case .Array:
+			fmt.wprintf(w, " (%v)", read_u16(chunk.code, offset + 1), flush = false)
 		case .Get_Local, .Set_Local:
 			fmt.wprintf(w, " [%v]", read_u16(chunk.code, offset + 1), flush = false)
 		case .Get_Upvalue, .Set_Upvalue:

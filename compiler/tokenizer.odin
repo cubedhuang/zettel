@@ -30,6 +30,8 @@ Token_Tag :: enum u8 {
 	Paren_Close,
 	Brace_Open,
 	Brace_Close,
+	Bracket_Open,
+	Bracket_Close,
 	// Keywords
 	Keyword_Nil,
 	Keyword_True,
@@ -75,6 +77,8 @@ token_lexemes := #partial [Token_Tag]string {
 	.Paren_Close         = ")",
 	.Brace_Open          = "{",
 	.Brace_Close         = "}",
+	.Bracket_Open        = "[",
+	.Bracket_Close       = "]",
 	// Keywords
 	.Keyword_Nil         = "nil",
 	.Keyword_True        = "true",
@@ -119,6 +123,8 @@ token_names := [Token_Tag]string {
 	.Paren_Close         = "')'",
 	.Brace_Open          = "'{'",
 	.Brace_Close         = "'}'",
+	.Bracket_Open        = "'['",
+	.Bracket_Close       = "']'",
 	// Keywords
 	.Keyword_Nil         = "'nil'",
 	.Keyword_True        = "'true'",
@@ -223,6 +229,10 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 		token.tag = .Brace_Open
 	case '}':
 		token.tag = .Brace_Close
+	case '[':
+		token.tag = .Bracket_Open
+	case ']':
+		token.tag = .Bracket_Close
 	case '\n':
 		token.tag = .Newline
 
@@ -302,6 +312,7 @@ scan :: proc(t: ^Tokenizer) -> (token: Token) {
 		break
 	case .Paren_Close,
 	     .Brace_Close,
+	     .Bracket_Close,
 	     .Number,
 	     .String,
 	     .Identifier,

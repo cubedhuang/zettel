@@ -25,5 +25,10 @@ else if false { } // error: 'else' must be on the same line as the '}' before it
 else { }      // error: 'else' must be on the same line as the '}' before it
 else { }      // error: expected statement, got 'else'
 
+// indexing needs an index, and arrays need their closing bracket
+empty_index := []
+echo empty_index[] // error: expected expression, got ']'
+echo [1, 2;        // error: expected ']', got ';'
+
 // a trailing operator continues the expression onto the next line
 echo 1 +     // error: expected expression, got end of input

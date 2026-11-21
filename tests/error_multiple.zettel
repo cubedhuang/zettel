@@ -13,7 +13,7 @@ echo a + b
 return ( // error: 'return' outside of a function
     nope // error: 'nope' is not declared
 )
-1 = ( // error: can only assign to variables
+1 = ( // error: can only assign to variables and elements
     also_nope // error: 'also_nope' is not declared
 )
 outer: {

@@ -3,6 +3,7 @@ package zettel_runtime
 import "../common"
 import "core:fmt"
 import "core:io"
+import "core:math"
 import "core:strings"
 
 MAX_FRAMES :: 1024
@@ -86,6 +87,13 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			vm_push(vm, TRUE)
 		case .False:
 			vm_push(vm, FALSE)
+		case .Array:
+			count := int(common.read_u16(chunk.code, ip))
+			ip += 2
+			items := make([dynamic]Value, count)
+			copy(items[:], vm.stack[len(vm.stack) - count:])
+			resize(&vm.stack, len(vm.stack) - count)
+			vm_push(vm, to_value(new_array(vm, items)))
 		case .Negate:
 			operand, is_number := as_number(vm_pop(vm))
 			if !is_number {
@@ -196,6 +204,16 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			} else {
 				vm.stack[upvalue.slot] = vm_pop(vm)
 			}
+		case .Get_Index:
+			index_value, indexed := vm_pop(vm), vm_pop(vm)
+			array, index, message := array_index(indexed, index_value)
+			if message != "" do return runtime_error(vm, chunk, start, message)
+			vm_push(vm, array.items[index])
+		case .Set_Index:
+			index_value, indexed, item := vm_pop(vm), vm_pop(vm), vm_pop(vm)
+			array, index, message := array_index(indexed, index_value)
+			if message != "" do return runtime_error(vm, chunk, start, message)
+			array.items[index] = item
 		case .Get_Local:
 			vm_push(vm, vm.stack[base + int(common.read_u16(chunk.code, ip))])
 			ip += 2
@@ -333,6 +351,32 @@ close_upvalues :: proc(vm: ^Vm, first: int) {
 		vm.open_upvalues = upvalue.next_open
 		upvalue.next_open = nil
 	}
+}
+
+// Checks that `indexed` is an array and `index_value` is one of its indices. A non-empty
+// `message` is the error and uses `context.temp_allocator`.
+array_index :: proc(
+	indexed, index_value: Value,
+) -> (
+	array: ^Obj_Array,
+	index: int,
+	message: string,
+) {
+	array = as_array(indexed) or_else nil
+	if array == nil do return nil, 0, "can only index arrays"
+	number, is_number := as_number(index_value)
+	if !is_number || number != math.trunc(number) do return nil, 0, "index must be an integer"
+	// compare as floats because huge numbers and infinities don't convert to `int`
+	if number < 0 || number >= f64(len(array.items)) {
+		return nil, 0, fmt.tprintf("index %v is out of bounds for length %v", number, len(array.items))
+	}
+	return array, int(number), ""
+}
+
+as_array :: proc(value: Value) -> (array: ^Obj_Array, ok: bool) {
+	obj := as_obj(value) or_return
+	if obj.tag != .Array do return nil, false
+	return (^Obj_Array)(obj), true
 }
 
 pop_numbers :: proc(vm: ^Vm) -> (lhs, rhs: f64, ok: bool) {

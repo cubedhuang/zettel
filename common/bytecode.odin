@@ -71,7 +71,8 @@ Op :: enum u8 {
 	Close_Upvalue,
 	// Calls the value below its arguments, which are on top of the stack. The operands are the
 	// argument count and the number of return values the caller expects, or `ALL_RESULTS`.
-	// Afterwards, the return values replace the callee and arguments.
+	// An argument count of `ALL_RESULTS` means the arguments are all the values of the call right
+	// before it. Afterwards, the return values replace the callee and arguments.
 	Call,
 	// Like `Call`, but the arguments are an array on top of the stack, from spreading. The
 	// operand is the expected number of return values.
@@ -114,7 +115,8 @@ op_operand_size := #partial [Op]int {
 }
 
 // As the expected result count of `Call` and `Call_Spread`, or as the count of `Return`, this means
-// any number of values. The VM remembers the count until the next call returns.
+// any number of values. The VM remembers the count until the next call returns. As the argument
+// count of `Call`, it means that remembered count.
 ALL_RESULTS :: 255
 
 Capture :: struct {
@@ -142,7 +144,7 @@ builtin_names := [Builtin]string {
 MAX_CONSTANTS :: 1 << 16
 MAX_STATICS :: 1 << 16
 MAX_LOCALS :: 1 << 16
-MAX_PARAMETERS :: 255
+MAX_PARAMETERS :: ALL_RESULTS - 1
 MAX_UPVALUES :: 256
 MAX_ELEMENTS :: int(max(u16))
 MAX_RESULTS :: ALL_RESULTS - 1

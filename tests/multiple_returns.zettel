@@ -57,6 +57,16 @@ next()
 n, tens := next()
 echo [n, tens] // expect: [2, 20]
 
+// a call that's the only argument passes all of its values
+fn add(a, b) { return a + b }
+fn pair() { return 1, 2 }
+echo add(pair()) // expect: 3
+first, others := split(three())
+echo [first, others] // expect: [1, [2, 3]]
+print(pair())        // expect: 1 2
+fn list() { return [3, 4] }
+echo add(..list()) // expect: 7
+
 // single values and bare returns are unchanged
 fn nothing() { return }
 echo nothing() // expect: nil

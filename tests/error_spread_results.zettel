@@ -1,0 +1,4 @@
+fn pair() { return 1, 2 }
+fn add(a, b) { return a + b }
+// spreading takes one array, not several values
+add(..pair()) // error: expected 1 return value, got 2

@@ -1,0 +1,3 @@
+fn pair() { return 1, 2 }
+fn one(a) {}
+one(pair()) // error: expected 1 argument, got 2

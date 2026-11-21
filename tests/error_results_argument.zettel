@@ -1,0 +1,4 @@
+fn pair() { return 1, 2 }
+fn add(a, b) { return a + b }
+// only a call that's the only argument passes all of its values
+add(pair(), 3) // error: expected 1 return value, got 2

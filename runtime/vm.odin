@@ -235,6 +235,7 @@ run :: proc(vm: ^Vm, main: ^Obj_Closure) -> (error: Runtime_Error, ok: bool) {
 			if op == .Call {
 				arg_count = int(chunk.code[ip])
 				ip += 1
+				if arg_count == common.ALL_RESULTS do arg_count = vm.result_count
 			} else {
 				// the compiler made this array, so it can't be anything else
 				args := (^Obj_Array)(to_obj(vm_pop(vm)))

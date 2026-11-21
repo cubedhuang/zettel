@@ -64,7 +64,9 @@ disassemble_chunk :: proc(w: io.Writer, module: Module, chunk: Chunk) {
 		case .Get_Builtin:
 			fmt.wprintf(w, " %v", builtin_names[Builtin(chunk.code[offset + 1])], flush = false)
 		case .Call:
-			fmt.wprintf(w, " (%v)", chunk.code[offset + 1], flush = false)
+			io.write_string(w, " (")
+			disassemble_results(w, chunk.code[offset + 1], "")
+			io.write_byte(w, ')')
 			disassemble_results(w, chunk.code[offset + 2], " -> ")
 		case .Call_Spread:
 			disassemble_results(w, chunk.code[offset + 1], " -> ")

@@ -647,7 +647,12 @@ compile_call :: proc(c: ^Compiler, index: Node_Index, results: int) {
 	span := node_span(c.ast, index)
 	callee, args := call_parts(c.ast, index)
 	compile_expression(c, callee)
-	if compile_list(c, args, span) {
+	if len(args) == 1 && is_call(c.ast, args[0]) {
+		// a call that's the only argument passes all of its values
+		compile_call(c, args[0], common.ALL_RESULTS)
+		emit(c, .Call, span)
+		emit_byte(c, common.ALL_RESULTS, span)
+	} else if compile_list(c, args, span) {
 		emit(c, .Call_Spread, span)
 	} else {
 		emit(c, .Call, span)
